@@ -1,0 +1,8 @@
+.DS_Store
+.build/
+logs/
+*.log
+*.jsonl
+bench_*.json
+epic_kernel_expanded.metal
+*.xcuserstate

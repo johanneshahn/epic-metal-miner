@@ -1,0 +1,24 @@
+# Third-party notices
+
+## KawPow Metal implementation
+
+This project includes code derived from the `shiftingeden/kawpow-mac` project,
+including Keccak, Ethash/DAG support, and Metal kernel scaffolding. Those
+sources are GPLv3-derived; this combined project is distributed under the GNU
+General Public License, version 3. See `LICENSE`.
+
+The files identify their provenance in source comments. The Epic-specific
+ProgPow changes are documented in the repository history and source comments.
+
+## Epic Cash source references
+
+The protocol and consensus behavior were implemented by reference to
+`EpicCash/epic` and `EpicCash/epic-miner`, both Apache License 2.0 projects.
+No Epic Cash source tree is included in this repository. Apache-2.0 is
+compatible with GPLv3 when conveyed as part of a GPLv3 combined work.
+
+## ProgPow test material
+
+The test vectors and oracle fingerprints are retained solely for regression
+testing of the implementation. Their upstream provenance is documented in the
+source and project history. Do not remove their provenance when redistributing.

@@ -1,0 +1,212 @@
+import Foundation
+
+// ProgPoW 0.9.2 per-period source generator (Epic Cash flavour).
+//
+// Authoritative reference: EpicCash/progpow-rust tag v0.2.0 (the revision the
+// Epic node pins), file pp_light/src/progpow.rs:
+//   - constants          lines 37-46
+//   - progpow_init       lines 221-248
+//   - inner loop         lines 253-341
+//   - finalisation       lines 343-403
+//
+// The kernel template has two placeholders filled in fresh for each progpow
+// period seed (= block_number / PROGPOW_PERIOD_LENGTH):
+//
+//   INCLUDE_PROGPOW_RANDOM_MATH  — interleaved random math + c_dag cache loads
+//   INCLUDE_PROGPOW_DATA_LOADS   — final merge of data_dag.s[0..3] into the mix
+//
+// Determinism: every miner generating from the same period seed must produce
+// identical code, otherwise miners and pool disagree on the hash.
+//
+// Differences from KawPow (kawpow-mac Epoch.swift):
+//   PERIOD 3 -> 50, CNT_CACHE 11 -> 12, CNT_MATH 18 -> 20.
+// The shuffle / op-emission order is intentionally left byte-identical, because
+// it is shared by all ProgPoW variants.
+
+enum EpicProgPow {
+    // ProgPoW 0.9.2 parameters — must match the kernel's #defines and
+    // progpow-rust pp_light/src/progpow.rs:37-46.
+    static let PROGPOW_LANES       = 16
+    static let PROGPOW_REGS        = 32
+    static let PROGPOW_DAG_LOADS   = 4
+    static let PROGPOW_CACHE_WORDS = 4096
+    static let PROGPOW_CNT_DAG     = 64
+    static let PROGPOW_CNT_MATH    = 20   // Epic/0.9.2 (KawPow: 18)
+    static let PROGPOW_CNT_CACHE   = 12   // Epic/0.9.2 (KawPow: 11)
+    static let PROGPOW_PERIOD      = 50   // Epic/0.9.2 (KawPow: 3)
+
+    static func progSeed(forBlockHeight height: UInt64) -> UInt64 {
+        return height / UInt64(PROGPOW_PERIOD)
+    }
+}
+
+// --------------------------------------------------------------------------
+// kiss99 PRNG — must match the Metal-side kiss99() and the Rust reference
+// exactly (progpow.rs:156-171), so the generated program matches every other
+// ProgPoW 0.9.2 miner.
+// --------------------------------------------------------------------------
+
+struct Kiss99 {
+    var z: UInt32
+    var w: UInt32
+    var jsr: UInt32
+    var jcong: UInt32
+
+    mutating func next() -> UInt32 {
+        z = 36969 &* (z & 0xFFFF) &+ (z >> 16)
+        w = 18000 &* (w & 0xFFFF) &+ (w >> 16)
+        let MWC = (z << 16) &+ w
+        jsr ^= jsr << 17
+        jsr ^= jsr >> 13
+        jsr ^= jsr << 5
+        jcong = 69069 &* jcong &+ 1234567
+        return (MWC ^ jcong) &+ jsr
+    }
+}
+
+// fnv1a hash used by ProgPoW to derive kiss99 state from prog_seed
+private let FNV_PRIME: UInt32 = 0x1000193
+private let FNV_OFFSET_BASIS: UInt32 = 0x811c9dc5
+
+private func fnv1a(_ h: inout UInt32, _ d: UInt32) -> UInt32 {
+    h = (h ^ d) &* FNV_PRIME
+    return h
+}
+
+// Initialise kiss99 from a 64-bit prog_seed — matches progpow_init()
+// (progpow.rs:221-227): z=fnv(basis, lo), w=fnv(z, hi), jsr=fnv(w, lo),
+// jcong=fnv(jsr, hi).
+func initKiss99(progSeed: UInt64) -> Kiss99 {
+    var fnvHash: UInt32 = FNV_OFFSET_BASIS
+    let lo = UInt32(truncatingIfNeeded: progSeed)
+    let hi = UInt32(truncatingIfNeeded: progSeed >> 32)
+    var st = Kiss99(z: 0, w: 0, jsr: 0, jcong: 0)
+    st.z     = fnv1a(&fnvHash, lo)
+    st.w     = fnv1a(&fnvHash, hi)
+    st.jsr   = fnv1a(&fnvHash, lo)
+    st.jcong = fnv1a(&fnvHash, hi)
+    return st
+}
+
+// --------------------------------------------------------------------------
+// Generated-source helpers
+// --------------------------------------------------------------------------
+
+// `math(a, b, r)` — selects one of 11 math operations on r % 11
+// (progpow-rust progpow.rs:205-219). Emitted as a Metal expression.
+private func mathExpr(a: String, b: String, r: UInt32) -> String {
+    switch r % 11 {
+    case 0:  return "(\(a) + \(b))"
+    case 1:  return "(\(a) * \(b))"
+    case 2:  return "mulhi(\(a), \(b))"                              // 32x32 -> high 32
+    case 3:  return "min(\(a), \(b))"
+    case 4:  return "rotate(\(a), (uint)(\(b)))"                      // ROTL32
+    case 5:  return "rotate(\(a), (uint)(32u - (\(b) & 31u)))"        // ROTR32
+    case 6:  return "(\(a) & \(b))"
+    case 7:  return "(\(a) | \(b))"
+    case 8:  return "(\(a) ^ \(b))"
+    case 9:  return "(clz(\(a)) + clz(\(b)))"
+    case 10: return "(popcount(\(a)) + popcount(\(b)))"
+    default: fatalError("unreachable")
+    }
+}
+
+// `merge(a, b, r)` — folds `b` into `a` four ways, on r % 4
+// (progpow-rust progpow.rs:196-203). Mutates `a`; returns a Metal statement.
+private func mergeStmt(dst: String, src: String, r: UInt32) -> String {
+    switch r % 4 {
+    case 0: return "\(dst) = (\(dst) * 33u) + \(src);"
+    case 1: return "\(dst) = (\(dst) ^ \(src)) * 33u;"
+    case 2:
+        let n = ((r >> 16) % 31) + 1
+        return "\(dst) = rotate(\(dst), \(n)u) ^ \(src);"
+    case 3:
+        let n = ((r >> 16) % 31) + 1
+        return "\(dst) = rotate(\(dst), (uint)(32u - \(n)u)) ^ \(src);"
+    default: fatalError("unreachable")
+    }
+}
+
+// --------------------------------------------------------------------------
+// Build the two source blocks for a given prog_seed.
+// --------------------------------------------------------------------------
+
+struct GeneratedKernel {
+    let randomMath: String
+    let dataLoads: String
+}
+
+func generateKernelSource(progSeed: UInt64) -> GeneratedKernel {
+    var rnd = initKiss99(progSeed: progSeed)
+
+    // progpow_init (progpow.rs:240-246): mix_seq_dst and mix_seq_cache are
+    // shuffled INTERLEAVED, walking i from N-1 down to 1, two rnd() calls per i.
+    // (Shuffling dst fully then cache fully consumes the same number of rnd()
+    // calls in the wrong order, shifting every downstream op and producing a
+    // hash that no other miner agrees with.)
+    var mixSeqDst   = Array(0..<EpicProgPow.PROGPOW_REGS)
+    var mixSeqCache = Array(0..<EpicProgPow.PROGPOW_REGS)
+    var i = EpicProgPow.PROGPOW_REGS - 1
+    while i > 0 {
+        let jDst   = Int(rnd.next() % UInt32(i + 1))
+        mixSeqDst.swapAt(i, jDst)
+        let jCache = Int(rnd.next() % UInt32(i + 1))
+        mixSeqCache.swapAt(i, jCache)
+        i -= 1
+    }
+    var dstIdx = 0
+    var cacheIdx = 0
+
+    // ─── RANDOM_MATH block ────────────────────────────────────────────────
+    // Interleaves cache reads (CNT_CACHE) with math ops (CNT_MATH); the
+    // reference loops max(CNT_CACHE, CNT_MATH) = 20 times (progpow.rs:297-323).
+    var randomMath = "{\n"
+    let maxIter = max(EpicProgPow.PROGPOW_CNT_CACHE, EpicProgPow.PROGPOW_CNT_MATH)
+    for i in 0..<maxIter {
+        if i < EpicProgPow.PROGPOW_CNT_CACHE {
+            let src = mixSeqCache[cacheIdx % EpicProgPow.PROGPOW_REGS]; cacheIdx += 1
+            let r   = rnd.next()
+            let dst = mixSeqDst[dstIdx % EpicProgPow.PROGPOW_REGS]; dstIdx += 1
+            randomMath += "  // cache load \(i)\n"
+            randomMath += "  data = c_dag[the_mix[\(src)] % PROGPOW_CACHE_WORDS];\n"
+            randomMath += "  " + mergeStmt(dst: "the_mix[\(dst)]", src: "data", r: r) + "\n"
+        }
+        if i < EpicProgPow.PROGPOW_CNT_MATH {
+            // progpow.rs:311-316: ONE rnd() generates both source indices and
+            // src1 != src2 is enforced.
+            let modulus = UInt32((EpicProgPow.PROGPOW_REGS - 1) * EpicProgPow.PROGPOW_REGS)
+            let srcRnd = Int(rnd.next() % modulus)
+            let src1 = srcRnd % EpicProgPow.PROGPOW_REGS
+            var src2 = srcRnd / EpicProgPow.PROGPOW_REGS
+            if src2 >= src1 { src2 += 1 }
+            let rsel = rnd.next()
+            let dst = mixSeqDst[dstIdx % EpicProgPow.PROGPOW_REGS]; dstIdx += 1
+            let rmerge = rnd.next()
+            let expr = mathExpr(a: "the_mix[\(src1)]", b: "the_mix[\(src2)]", r: rsel)
+            randomMath += "  // math \(i)\n"
+            randomMath += "  data = \(expr);\n"
+            randomMath += "  " + mergeStmt(dst: "the_mix[\(dst)]", src: "data", r: rmerge) + "\n"
+        }
+    }
+    randomMath += "}\n"
+
+    // ─── DATA_LOADS block ─────────────────────────────────────────────────
+    // Consume data_dag.s[0..3] into mix registers (progpow.rs:335-339):
+    // index 0 always merges into mix[0]; the rest follow mix_seq_dst.
+    var dataLoads = "{\n"
+    for i in 0..<EpicProgPow.PROGPOW_DAG_LOADS {
+        let r = rnd.next()
+        let dst: Int
+        if i == 0 {
+            dst = 0
+        } else {
+            dst = mixSeqDst[dstIdx % EpicProgPow.PROGPOW_REGS]
+            dstIdx += 1
+        }
+        dataLoads += "  data = data_dag.s[\(i)];\n"
+        dataLoads += "  " + mergeStmt(dst: "the_mix[\(dst)]", src: "data", r: r) + "\n"
+    }
+    dataLoads += "}\n"
+
+    return GeneratedKernel(randomMath: randomMath, dataLoads: dataLoads)
+}
