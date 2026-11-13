@@ -69,6 +69,22 @@ submit.
 .build/release/epic-metal mine HOST:PORT --worker my-mac --submit
 ```
 
+### IniAku Pool example
+
+IniAku uses plain TCP Stratum on port `3333`. Choose the closest regional host:
+`id.epic.iniaku.my.id`, `au.epic.iniaku.my.id`, `us.epic.iniaku.my.id`, or
+`eu.epic.iniaku.my.id`. This miner does not use the pool's TLS port `3334`.
+
+```sh
+# Live mining: replace the example address and worker suffix with your own.
+.build/release/epic-metal mine eu.epic.iniaku.my.id:3333 \
+  --worker 'YOUR_EPICBOX_ADDRESS@epicbox.epiccash.com.mac-metal' \
+  --password x
+```
+
+The example identity is deliberately not a real address. To validate the
+connection without submitting shares, add `--dry-run`.
+
 Use `Ctrl-C` or `SIGTERM` to stop. The miner closes its socket, releases its
 retained DAG/pipeline resources, and prints final counters.
 
