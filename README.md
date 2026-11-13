@@ -81,6 +81,10 @@ found on the active template, plus the completed previous-job summary. Use
 these measured counts—not a nominal hash rate—to tune a node's minimum share
 difficulty. One share per job is a probabilistic target, not a guarantee.
 
+`ProgPow blocks` counts distinct consensus-selected ProgPow heights observed
+in the session, not template refreshes. `Accepted/block` and `Found/block`
+are session averages divided by that count.
+
 See `EPIC_METAL_M9_REPORT.md` for memory-lifetime findings, terminal behavior,
 and the statistics definitions.
 

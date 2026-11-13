@@ -31,6 +31,9 @@ struct EpicMiningStats {
     var stale = 0
     var unknown = 0
     var reconnects = 0
+    /// Consensus-selected ProgPow heights observed this session. Template
+    /// refreshes at the same height do not increment this value.
+    var progpowBlocks = 0
 }
 
 struct EpicJobShareStats {
@@ -81,6 +84,7 @@ final class EpicMiningClient {
     private var lastEvent = "Starting"
     private var displayedAlgorithm: String?
     private var displayedHeight: UInt64?
+    private var lastProgpowBlockHeight: UInt64?
     private var activeJobShares: EpicJobShareStats?
     private var lastCompletedJob = "No completed ProgPow job yet"
 
@@ -265,6 +269,10 @@ final class EpicMiningClient {
             return
         }
         let job = try EpicMiningJob(generation: generation, template: template)
+        if lastProgpowBlockHeight != template.height {
+            stats.progpowBlocks += 1
+            lastProgpowBlockHeight = template.height
+        }
         active = job
         activeJobShares = EpicJobShareStats(fingerprint: job.fingerprint, height: template.height, jobID: template.jobID)
         nonce = UInt64.random(in: UInt64.min...UInt64.max)
@@ -374,20 +382,23 @@ final class EpicMiningClient {
         let memoryBytes = sampleProcessResidentMemoryBytes()
         let memoryText = memoryBytes.map { String(format: "%.1f MiB", Double($0) / 1_048_576) } ?? "unavailable"
         let efficiency = watts.flatMap { $0 > 0 && activeCoverage >= 0.8 ? currentMH / $0 : nil }
+        let acceptedPerBlock = stats.progpowBlocks > 0 ? Double(stats.accepted) / Double(stats.progpowBlocks) : 0
+        let foundPerBlock = stats.progpowBlocks > 0 ? Double(stats.locallyValidShares) / Double(stats.progpowBlocks) : 0
         if terminal.isInteractive {
             terminal.dashboard(compactDashboard(connection: connected, algorithm: "ProgPow", height: job.template.height,
                                                 epoch: job.epoch, uptime: uptime, activeMHps: currentMH,
                                                 effectiveMHps: snapshot.effectiveMHps, power: watts, efficiency: efficiency,
                                                 memoryBytes: memoryBytes, snapshot: snapshot, stats: stats,
                                                 jobShares: activeJobShares, lastCompletedJob: lastCompletedJob,
-                                                lastEvent: lastEvent))
+                                                acceptedPerProgpowBlock: acceptedPerBlock,
+                                                foundPerProgpowBlock: foundPerBlock, lastEvent: lastEvent))
             return
         }
-        print(String(format: "[miner] status=%@ uptime=%@ height=%llu epoch=%llu algorithm=progpow share_diff=%llu active=%.2f MH/s effective=%.2f MH/s active_time=%.1f%% idle=%.1fs prep=%.1fs reconnect=%.1fs gpu_power=%@ efficiency=%@ memory=%@ job_shares=%@ accepted=%d rejected=%d stale=%d unknown=%d reconnects=%d",
+        print(String(format: "[miner] status=%@ uptime=%@ height=%llu epoch=%llu algorithm=progpow share_diff=%llu active=%.2f MH/s effective=%.2f MH/s active_time=%.1f%% idle=%.1fs prep=%.1fs reconnect=%.1fs gpu_power=%@ efficiency=%@ memory=%@ job_shares=%@ progpow_blocks=%d accepted_per_block=%.2f found_per_block=%.2f accepted=%d rejected=%d stale=%d unknown=%d reconnects=%d",
                      connected ? "connected" : "disconnected", formatDuration(uptime), job.template.height, job.epoch,
                      (try? job.template.shareDifficulty(for: .progpow)) ?? 0, currentMH, snapshot.effectiveMHps,
                      snapshot.activeUtilization * 100, snapshot.algorithmIdleSeconds, snapshot.preparationSeconds,
-                     snapshot.reconnectSeconds, powerText, efficiencyText, memoryText, activeJobShares?.summary ?? "none", stats.accepted, stats.rejected,
+                     snapshot.reconnectSeconds, powerText, efficiencyText, memoryText, activeJobShares?.summary ?? "none", stats.progpowBlocks, acceptedPerBlock, foundPerBlock, stats.accepted, stats.rejected,
                      stats.stale, stats.unknown, stats.reconnects))
     }
 
