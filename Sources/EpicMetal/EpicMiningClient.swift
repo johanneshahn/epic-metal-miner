@@ -14,6 +14,9 @@ struct EpicMiningConfig {
     /// nil means continuous submission. A cap is useful for authorized tests.
     let maximumShares: Int?
     let statisticsInterval: TimeInterval
+    /// True only when the user supplied --stats. Interactive dashboards use a
+    /// one-second cadence by default without making redirected logs noisy.
+    let statisticsIntervalWasSet: Bool
     let duration: TimeInterval?
     let verbosity: EpicLogVerbosity
     let colorMode: EpicColorMode
@@ -97,6 +100,7 @@ final class EpicMiningClient {
     private var completedJobsAwaitingResponses = [String: EpicJobShareStats]()
     private var lastCompletedJob = "No completed ProgPow job yet"
     private var sessionEnergyStart: Double?
+    private var hasConnectedOnce = false
 
     init(device: MTLDevice, config: EpicMiningConfig) throws {
         self.config = config
@@ -138,7 +142,15 @@ final class EpicMiningClient {
                 connected = false
                 guard !shouldStop(started: started) else { break }
                 stats.reconnects += 1
-                log(.normal, "connection error: \(error); retrying in 5 seconds")
+                event(.error, subsystem: "STRATUM", "Connection lost")
+                if terminal.isInteractive {
+                    let now = monotonicNow()
+                    printStatistics(job: nil, uptime: now - started, currentMH: 0,
+                                    snapshot: performance.snapshot(sessionSeconds: now - started),
+                                    intervalActiveSeconds: 0, intervalSeconds: 0, watts: nil,
+                                    averageWatts: sessionAveragePower(energy: powerSampler?.gpuJoules(), started: started, now: now))
+                }
+                terminal.event(.info, subsystem: "MINER", "connection error: \(error); retrying in 5 seconds", activity: false)
                 let reconnectStarted = monotonicNow()
                 waitInterruptibly(seconds: 5, started: started)
                 performance.recordReconnect(monotonicNow() - reconnectStarted)
@@ -148,7 +160,8 @@ final class EpicMiningClient {
 
     private func runConnected(started: TimeInterval) throws {
         var nextStatus = monotonicNow() + 30
-        var nextStats = monotonicNow() + config.statisticsInterval
+        let refreshInterval = terminal.isInteractive && !config.statisticsIntervalWasSet ? 1 : config.statisticsInterval
+        var nextStats = monotonicNow() + refreshInterval
         var intervalHashes: UInt64 = 0
         var intervalActiveSeconds = 0.0
         var intervalStart = monotonicNow()
@@ -161,6 +174,19 @@ final class EpicMiningClient {
                 nextStatus = monotonicNow() + 30
             }
             guard let job = active, let gpu else {
+                if monotonicNow() >= nextStats {
+                    let now = monotonicNow()
+                    let intervalSeconds = now - intervalStart
+                    let energy = powerSampler?.gpuJoules()
+                    let watts = intervalPower(previous: previousEnergy, current: energy, seconds: intervalSeconds)
+                    previousEnergy = energy
+                    printStatistics(job: nil, uptime: now - started, currentMH: 0,
+                                    snapshot: performance.snapshot(sessionSeconds: now - started),
+                                    intervalActiveSeconds: 0, intervalSeconds: intervalSeconds, watts: watts,
+                                    averageWatts: sessionAveragePower(energy: energy, started: started, now: now))
+                    intervalStart = now
+                    nextStats = now + refreshInterval
+                }
                 waitInterruptibly(seconds: 0.05, started: started)
                 continue
             }
@@ -203,22 +229,16 @@ final class EpicMiningClient {
                 let currentMH = intervalActiveSeconds > 0 ? Double(intervalHashes) / intervalActiveSeconds / 1e6 : 0
                 let snapshot = performance.snapshot(sessionSeconds: now - started)
                 let energy = powerSampler?.gpuJoules()
-                let watts: Double? = {
-                    guard let previousEnergy, let energy, intervalSeconds > 0, energy >= previousEnergy else { return nil }
-                    return (energy - previousEnergy) / intervalSeconds
-                }()
+                let watts = intervalPower(previous: previousEnergy, current: energy, seconds: intervalSeconds)
                 previousEnergy = energy
-                let averageWatts: Double? = {
-                    guard let initial = sessionEnergyStart, let energy, now > started, energy >= initial else { return nil }
-                    return (energy - initial) / (now - started)
-                }()
+                let averageWatts = sessionAveragePower(energy: energy, started: started, now: now)
                 printStatistics(job: job, uptime: now - started, currentMH: currentMH,
                                 snapshot: snapshot, intervalActiveSeconds: intervalActiveSeconds,
                                 intervalSeconds: intervalSeconds, watts: watts, averageWatts: averageWatts)
                 intervalStart = now
                 intervalHashes = 0
                 intervalActiveSeconds = 0
-                nextStats = now + config.statisticsInterval
+                nextStats = now + refreshInterval
             }
         }
     }
@@ -228,7 +248,8 @@ final class EpicMiningClient {
         connected = true
         try send(method: "login", params: ["login": config.worker, "pass": config.password, "agent": "epic-metal/0.2"])
         try send(method: "getjobtemplate", params: ["algorithm": EpicAlgorithm.progpow.rawValue])
-        event(.info, subsystem: "STRATUM", "Connected to endpoint")
+        event(.info, subsystem: "STRATUM", hasConnectedOnce ? "Reconnected" : "Connected")
+        hasConnectedOnce = true
     }
 
     private func send(method: String, params: Any?, jobFingerprint: String? = nil) throws {
@@ -266,7 +287,12 @@ final class EpicMiningClient {
                         recordShareResponse(request?.jobFingerprint, outcome: .rejected)
                     }
                 }
-                event(requestMethod == "submit" ? .error : .warn, subsystem: "STRATUM", "\(requestMethod ?? "RPC") response: \(text)")
+                if requestMethod == "submit" {
+                    event(.error, subsystem: "STRATUM", "Share rejected")
+                } else {
+                    terminal.event(.warn, subsystem: "STRATUM", "\(requestMethod ?? "RPC") response: \(text)", activity: false)
+                    event(.warn, subsystem: "STRATUM", "Waiting for work")
+                }
                 continue
             }
             if requestMethod == "submit", let result = message["result"] {
@@ -337,9 +363,7 @@ final class EpicMiningClient {
             completedJobsAwaitingResponses[jobShares.fingerprint] = jobShares
         } else {
             lastCompletedJob = jobShares.summary
-            if jobShares.found > 0 || config.verbosity == .verbose {
-                event(.info, subsystem: "MINING", "ProgPow job completed | \(jobShares.summary)")
-            }
+            reportCompletedJob(jobShares)
         }
         activeJobShares = nil
     }
@@ -355,7 +379,7 @@ final class EpicMiningClient {
         if completed.submitted == completed.accepted + completed.rejected + completed.stale {
             completedJobsAwaitingResponses.removeValue(forKey: fingerprint)
             lastCompletedJob = completed.summary
-            event(.info, subsystem: "MINING", "ProgPow job completed | \(completed.summary)")
+            reportCompletedJob(completed)
         } else {
             completedJobsAwaitingResponses[fingerprint] = completed
         }
@@ -375,6 +399,19 @@ final class EpicMiningClient {
         case .rejected: job.rejected += 1
         case .stale: job.stale += 1
         }
+    }
+
+    private func reportCompletedJob(_ job: EpicJobShareStats) {
+        guard job.found > 0 || job.accepted > 0 || config.verbosity == .verbose else { return }
+        let accepted = job.accepted
+        let description: String
+        if accepted > 0 {
+            description = "Job #\(job.jobID) completed · \(accepted) share\(accepted == 1 ? "" : "s") accepted"
+        } else {
+            description = "Job #\(job.jobID) completed · \(job.found) share\(job.found == 1 ? "" : "s") found"
+        }
+        event(.info, subsystem: "MINING", description)
+        log(.verbose, "completed \(job.summary)")
     }
 
     private func handleLocallyValid(_ candidate: EpicGpuCandidate, job: EpicMiningJob) throws {
@@ -441,7 +478,17 @@ final class EpicMiningClient {
         connected = false
     }
 
-    private func printStatistics(job: EpicMiningJob, uptime: TimeInterval, currentMH: Double,
+    private func intervalPower(previous: Double?, current: Double?, seconds: TimeInterval) -> Double? {
+        guard let previous, let current, seconds > 0, current >= previous else { return nil }
+        return (current - previous) / seconds
+    }
+
+    private func sessionAveragePower(energy: Double?, started: TimeInterval, now: TimeInterval) -> Double? {
+        guard let initial = sessionEnergyStart, let energy, now > started, energy >= initial else { return nil }
+        return (energy - initial) / (now - started)
+    }
+
+    private func printStatistics(job: EpicMiningJob?, uptime: TimeInterval, currentMH: Double,
                                  snapshot: MiningPerformanceSnapshot, intervalActiveSeconds: TimeInterval,
                                  intervalSeconds: TimeInterval, watts: Double?, averageWatts: Double?) {
         let powerText = watts.map { String(format: "%.2f W", $0) } ?? "unavailable"
@@ -456,13 +503,25 @@ final class EpicMiningClient {
         let foundPerJob = shareAccounting.foundPerJob
         let expectedPerBlock = shareAccounting.expectedPerBlock
         if terminal.isInteractive {
-            terminal.dashboard(compactDashboard(connection: connected, algorithm: "ProgPow", height: job.template.height,
-                                                epoch: job.epoch, uptime: uptime, recentActiveMHps: currentMH,
+            let selectedAlgorithm = job == nil ? displayedAlgorithm : EpicAlgorithm.progpow.rawValue
+            let algorithm: String
+            switch selectedAlgorithm {
+            case "progpow": algorithm = "ProgPow"
+            case "randomx": algorithm = "RandomX"
+            case "cuckoo": algorithm = "Cuckoo"
+            default: algorithm = "Waiting for work"
+            }
+            terminal.dashboard(compactDashboard(connection: connected, algorithm: algorithm,
+                                                height: job?.template.height ?? displayedHeight,
+                                                epoch: job?.epoch, uptime: uptime, recentActiveMHps: currentMH,
                                                 cumulativeActiveMHps: snapshot.activeMHps,
                                                 effectiveMHps: snapshot.effectiveMHps, power: watts, averagePower: averageWatts,
                                                 efficiency: efficiency, sessionEfficiency: sessionEfficiency,
                                                 memoryBytes: memoryBytes, snapshot: snapshot, stats: stats,
-                                                jobShares: activeJobShares, lastCompletedJob: lastCompletedJob,
+                                                jobShares: activeJobShares, jobID: job?.template.jobID,
+                                                shareDifficulty: job.flatMap { try? $0.template.shareDifficulty(for: .progpow) },
+                                                hashing: job != nil, submissionsEnabled: config.submitShares,
+                                                lastCompletedJob: lastCompletedJob,
                                                 acceptedPerProgpowBlock: acceptedPerBlock,
                                                 foundPerProgpowBlock: foundPerBlock, foundPerJob: foundPerJob,
                                                 expectedPerProgpowBlock: expectedPerBlock, lastEvent: lastEvent,
@@ -470,6 +529,7 @@ final class EpicMiningClient {
                                                 narrow: terminal.columns < 72))
             return
         }
+        guard let job else { return }
         let averagePowerText = averageWatts.map { String(format: "%.2f W", $0) } ?? "unavailable"
         let sessionEfficiencyText = sessionEfficiency.map { String(format: "%.2f MH/s/W", $0) } ?? "unavailable"
         print(String(format: "[miner] status=%@ uptime=%@ height=%llu epoch=%llu algorithm=progpow share_diff=%llu active_recent=%.2f MH/s active_average=%.2f MH/s effective_session=%.2f MH/s active_time=%.1f%% idle=%.1fs prep=%.1fs reconnect=%.1fs gpu_power_recent=%@ gpu_power_average=%@ efficiency_recent=%@ efficiency_session=%@ memory=%@ job_shares=%@ progpow_blocks=%d found_per_block=%.2f found_per_job=%.2f expected_per_block=%.2f accepted_per_block=%.2f accepted=%d rejected=%d stale=%d unknown=%d reconnects=%d",

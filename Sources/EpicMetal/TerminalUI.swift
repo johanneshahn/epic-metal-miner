@@ -51,7 +51,10 @@ final class MinerTerminal {
         if activity {
             let shortTime = String(timestamp().suffix(8))
             let symbol: String = level == .error ? "✕" : level == .warn ? "●" : "✓"
-            recent.append("\(shortTime)  \(symbol) \(message)")
+            let clean = message.replacingOccurrences(of: "\t", with: " ")
+                .replacingOccurrences(of: "\n", with: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            recent.append("\(shortTime)  \(symbol) \(clean)")
             if recent.count > 4 { recent.removeFirst(recent.count - 4) }
         }
         guard console, !interactive else { return }
@@ -90,19 +93,26 @@ final class MinerTerminal {
     }
 
     private func decorateDashboard(_ text: String) -> String {
-        guard colors else { return text }
+        guard colors else {
+            return text.replacingOccurrences(of: "[[new]]", with: "")
+                .replacingOccurrences(of: "[[/new]]", with: "")
+        }
         func paint(_ value: String, _ code: String) -> String { "\u{001B}[\(code)m\(value)\u{001B}[0m" }
         return text
             .replacingOccurrences(of: "EPIC METAL MINER", with: paint("EPIC METAL MINER", "96"))
-            .replacingOccurrences(of: "MINING", with: paint("MINING", "92"))
+            .replacingOccurrences(of: "LIVE MINING", with: paint("LIVE MINING", "92"))
+            .replacingOccurrences(of: "DRY RUN", with: paint("DRY RUN", "93"))
             .replacingOccurrences(of: "WAITING", with: paint("WAITING", "93"))
+            .replacingOccurrences(of: "Reconnecting", with: paint("Reconnecting", "93"))
             .replacingOccurrences(of: "Connected", with: paint("Connected", "92"))
             .replacingOccurrences(of: "Disconnected", with: paint("Disconnected", "91"))
             .replacingOccurrences(of: "ProgPow", with: paint("ProgPow", "97"))
             .replacingOccurrences(of: "PERFORMANCE", with: paint("PERFORMANCE", "96"))
-            .replacingOccurrences(of: "NETWORK", with: paint("NETWORK", "96"))
+            .replacingOccurrences(of: "CURRENT WORK", with: paint("CURRENT WORK", "96"))
             .replacingOccurrences(of: "SHARES", with: paint("SHARES", "96"))
             .replacingOccurrences(of: "RECENT ACTIVITY", with: paint("RECENT ACTIVITY", "96"))
+            .replacingOccurrences(of: "[[new]]", with: "\u{001B}[96m")
+            .replacingOccurrences(of: "[[/new]]", with: "\u{001B}[0m")
     }
 
     private func timestamp() -> String {
@@ -114,10 +124,11 @@ final class MinerTerminal {
 }
 
 func compactDashboard(connection: Bool, algorithm: String, height: UInt64?, epoch: UInt64?, uptime: TimeInterval,
-                      recentActiveMHps: Double, cumulativeActiveMHps: Double, effectiveMHps: Double,
-                      power: Double?, averagePower: Double?, efficiency: Double?, sessionEfficiency: Double?, memoryBytes: UInt64?,
-                      snapshot: MiningPerformanceSnapshot, stats: EpicMiningStats, jobShares: EpicJobShareStats?,
-                      lastCompletedJob: String, acceptedPerProgpowBlock: Double,
+                       recentActiveMHps: Double, cumulativeActiveMHps: Double, effectiveMHps: Double,
+                       power: Double?, averagePower: Double?, efficiency: Double?, sessionEfficiency: Double?, memoryBytes: UInt64?,
+                       snapshot: MiningPerformanceSnapshot, stats: EpicMiningStats, jobShares: EpicJobShareStats?,
+                       jobID: UInt64?, shareDifficulty: UInt64?, hashing: Bool, submissionsEnabled: Bool,
+                       lastCompletedJob: String, acceptedPerProgpowBlock: Double,
                       foundPerProgpowBlock: Double, foundPerJob: Double, expectedPerProgpowBlock: Double,
                       lastEvent: String, recentEvents: [String],
                       mode: EpicDashboardMode, narrow: Bool) -> String {
@@ -126,19 +137,25 @@ func compactDashboard(connection: Bool, algorithm: String, height: UInt64?, epoc
     let efficiencyText = efficiency.map { String(format: "%.2f MH/s/W", $0) } ?? "unavailable"
     let sessionEfficiencyText = sessionEfficiency.map { String(format: "%.2f MH/s/W", $0) } ?? "unavailable"
     let memoryText = memoryBytes.map { String(format: "%.1f MiB", Double($0) / 1_048_576) } ?? "unavailable"
-    let state = algorithm == "ProgPow" ? "● MINING" : "● WAITING — \(algorithm) block"
-    let activity = recentEvents.isEmpty ? "  —" : recentEvents.map { "  \($0)" }.joined(separator: "\n")
+    let submissionMode = submissionsEnabled ? "● LIVE MINING" : "● DRY RUN"
+    let workStatus = !connection ? "Reconnecting" : hashing ? "Mining" : algorithm == "ProgPow" ? "Waiting for work" : "GPU paused"
+    let activityLimit = narrow ? 58 : 88
+    let activity = recentEvents.isEmpty ? "—" : recentEvents.reversed().enumerated().map { index, event in
+        let clipped = event.count > activityLimit ? String(event.prefix(activityLimit - 1)) + "…" : event
+        let line = index == 0 ? "[[new]]\(clipped)[[/new]]" : clipped
+        return line
+    }.joined(separator: "\n  ")
     if narrow {
         return """
-        EPIC METAL MINER  \(state)
+        EPIC METAL MINER  \(submissionMode)
         \(String(format: "%.2f MH/s", recentActiveMHps))  ACTIVE (RECENT)
         Effective \(String(format: "%.2f MH/s", effectiveMHps))  ·  \(String(format: "%.1f%%", snapshot.activeUtilization * 100)) ProgPow
-        Shares \(stats.accepted) accepted / \(stats.rejected) rejected / \(stats.stale) stale
+        Found \(stats.locallyValidShares) · Submitted \(stats.submitted) · Accepted \(stats.accepted)
         \(lastEvent)
         """
     }
     var text = """
-      EPIC METAL MINER                                      \(state)
+      EPIC METAL MINER                                      \(submissionMode)
       Apple Silicon · Metal GPU
       ───────────────────────────────────────────────────────────
 
@@ -155,15 +172,23 @@ func compactDashboard(connection: Bool, algorithm: String, height: UInt64?, epoc
 
       ───────────────────────────────────────────────────────────
 
-      NETWORK
+      CURRENT WORK
       Connection         \(connection ? "Connected" : "Disconnected")
       Algorithm          \(algorithm)
       Block              \(height.map { "#\($0)" } ?? "—")
+      Job                \(jobID.map { "#\($0)" } ?? "—")
+      Share difficulty   \(shareDifficulty.map(String.init) ?? "—")
+      Status             \(workStatus)
       Uptime             \(formatDuration(uptime))
 
       ───────────────────────────────────────────────────────────
 
-      SHARES             \(stats.accepted) accepted   \(stats.rejected) rejected   \(stats.stale) stale
+      SHARES
+      Found              \(stats.locallyValidShares)
+      Submitted          \(stats.submitted)
+      Accepted           \(stats.accepted)
+      Rejected           \(stats.rejected)
+      Stale              \(stats.stale)
       Shares / ProgPow block   \(String(format: "%.2f", foundPerProgpowBlock))
       Shares / job             \(String(format: "%.2f", foundPerJob))
 

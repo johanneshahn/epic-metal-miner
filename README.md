@@ -138,6 +138,11 @@ distinct observed consensus-selected ProgPow height, not a 15-second template
 refresh; unsupported algorithms are excluded. These are session averages and
 are probabilistic monitoring values, not difficulty controls.
 
+In an interactive terminal, the compact dashboard refreshes once per second by
+default. `--stats SECONDS` overrides that refresh interval. Redirected output
+stays line-oriented at the normal statistics cadence and never contains ANSI
+dashboard control sequences.
+
 ## Troubleshooting
 
 - **`idle` / RandomX or Cuckoo:** normal. The node selected a different

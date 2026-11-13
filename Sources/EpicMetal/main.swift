@@ -29,7 +29,7 @@ func usage() -> Never {
                                 --password TEXT   Stratum password (default x)
                                 --submit          enable share submission (default disabled)
                                 --max-shares N    stop after N submissions; 0 = continuous
-                                --stats SECONDS   status interval (default 15)
+                                --stats SECONDS   dashboard refresh override; plain logs default to 15
                                 --duration SEC    stop after this duration (testing only)
                                 --log LEVEL       quiet, normal (default), or verbose
                                 --color MODE      auto (default), always, or never
@@ -97,6 +97,7 @@ do {
         var submit = false
         var maximumShares: Int?
         var statisticsInterval: TimeInterval = 15
+        var statisticsIntervalWasSet = false
         var duration: TimeInterval?
         var verbosity: EpicLogVerbosity = .normal
         var colorMode: EpicColorMode = .auto
@@ -123,6 +124,7 @@ do {
             case "--stats":
                 guard i + 1 < args.count, let value = TimeInterval(args[i + 1]), value > 0 else { usage() }
                 statisticsInterval = value
+                statisticsIntervalWasSet = true
                 i += 2
             case "--duration":
                 guard i + 1 < args.count, let value = TimeInterval(args[i + 1]), value > 0 else { usage() }
@@ -153,7 +155,8 @@ do {
             FileHandle.standardError.write("WARNING: --submit enables live Stratum submissions. Confirm node/pool authorization before continuing.\n".data(using: .utf8)!)
         }
         let miningConfig = EpicMiningConfig(endpoint: args[2], worker: worker, password: password, submitShares: submit,
-                                            maximumShares: maximumShares, statisticsInterval: statisticsInterval,
+                                             maximumShares: maximumShares, statisticsInterval: statisticsInterval,
+                                             statisticsIntervalWasSet: statisticsIntervalWasSet,
                                             duration: duration, verbosity: verbosity, colorMode: colorMode,
                                             dashboardMode: dashboardMode, logFile: logFile)
         try EpicMiningClient(device: device, config: miningConfig).run()
