@@ -24,10 +24,11 @@ func usage() -> Never {
       stratum-check ENDPOINT read and validate one Epic Stratum template; no mining/submission
       protocol-selftest     test full 256-bit Epic difficulty/target conversion
       statistics-selftest   test active/effective mining-time accounting
-      mine ENDPOINT [options] mine consensus-selected ProgPow jobs; dry-run by default
+      mine ENDPOINT [options] mine consensus-selected ProgPow jobs; live submission by default
                                 --worker ID       worker identity (default epic-metal)
                                 --password TEXT   Stratum password (default x)
-                                --submit          enable share submission (default disabled)
+                                --submit          enable share submission (default; retained for compatibility)
+                                --dry-run         find shares locally without submitting them
                                 --max-shares N    stop after N submissions; 0 = continuous
                                 --stats SECONDS   dashboard refresh override; plain logs default to 15
                                 --duration SEC    stop after this duration (testing only)
@@ -94,7 +95,7 @@ do {
         guard args.count >= 3 else { usage() }
         var worker = "epic-metal"
         var password = "x"
-        var submit = false
+        var submit = true
         var maximumShares: Int?
         var statisticsInterval: TimeInterval = 15
         var statisticsIntervalWasSet = false
@@ -116,6 +117,9 @@ do {
                 i += 2
             case "--submit":
                 submit = true
+                i += 1
+            case "--dry-run":
+                submit = false
                 i += 1
             case "--max-shares":
                 guard i + 1 < args.count, let value = Int(args[i + 1]), value >= 0 else { usage() }
@@ -152,7 +156,7 @@ do {
             }
         }
         if submit {
-            FileHandle.standardError.write("WARNING: --submit enables live Stratum submissions. Confirm node/pool authorization before continuing.\n".data(using: .utf8)!)
+            FileHandle.standardError.write("WARNING: live Stratum submissions are enabled. Use --dry-run for local-only validation.\n".data(using: .utf8)!)
         }
         let miningConfig = EpicMiningConfig(endpoint: args[2], worker: worker, password: password, submitShares: submit,
                                              maximumShares: maximumShares, statisticsInterval: statisticsInterval,

@@ -9,7 +9,8 @@ back to CPU mining or another proof-of-work algorithm.
 - Official ProgPow 0.9.2 GPU vectors: **12/12 pass**.
 - Mainnet integration: three controlled, authorized shares were accepted by a
   local Epic node; details are in `EPIC_METAL_PROGRESS.md`.
-- Mining is dry-run by default. `--submit` is required to send a share.
+- Mining submits valid shares by default. Use `--dry-run` for local-only
+  validation without submissions.
 - Only a template whose returned `algorithm` is exactly `progpow` is mined.
   RandomX, Cuckoo, and unknown jobs safely idle the miner.
 
@@ -58,20 +59,21 @@ submit.
 ## Mining
 
 ```sh
-# Continuous, no-submit validation run
+# Continuous live mining — only on an endpoint you are authorized to use
 .build/release/epic-metal mine HOST:PORT --worker my-mac
 
 # A one-hour dry-run with 30-second statistics
-.build/release/epic-metal mine HOST:PORT --worker my-mac --duration 3600 --stats 30
+.build/release/epic-metal mine HOST:PORT --worker my-mac --dry-run --duration 3600 --stats 30
 
-# Live shares — only on an endpoint you are authorized to use
+# `--submit` is accepted for compatibility; it is already the default
 .build/release/epic-metal mine HOST:PORT --worker my-mac --submit
 ```
 
 Use `Ctrl-C` or `SIGTERM` to stop. The miner closes its socket, releases its
 retained DAG/pipeline resources, and prints final counters.
 
-Never use `--submit` against a node or pool without authorization. A node can
+Never mine against a node or pool without authorization. Use `--dry-run` when
+testing locally. A node can
 select any Epic algorithm for a height, so passing `progpow` to
 `getjobtemplate` does not reserve a ProgPow job.
 
@@ -82,7 +84,8 @@ select any Epic algorithm for a height, so passing `progpow` to
 | `ENDPOINT` | required | `HOST:PORT` Epic Stratum endpoint |
 | `--worker ID` | `epic-metal` | Stratum worker identity |
 | `--password TEXT` | `x` | Stratum password; MineFleet specifies `x` |
-| `--submit` | off | Send locally valid shares |
+| `--submit` | on | Send locally valid shares (compatibility option) |
+| `--dry-run` | off | Find locally valid shares without submitting them |
 | `--max-shares N` | unlimited | Stop after N submitted shares; `0` means unlimited |
 | `--stats SECONDS` | `15` | Periodic status interval |
 | `--duration SEC` | unlimited | Stop after a controlled test duration |
