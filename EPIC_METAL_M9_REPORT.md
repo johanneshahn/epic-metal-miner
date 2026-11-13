@@ -54,6 +54,8 @@ normal events report meaningful state transitions and share outcomes.
 
 - Clean build, `protocol-selftest`, and `statistics-selftest` pass after M9
   changes. The official Metal GPU vectors remain 12/12 PASS.
+- The final regression was rerun after per-ProgPow-block share statistics were
+  added: build, both self-tests and all 12 vectors PASS.
 - Redirected-output checks passed: `--color auto` emitted no ANSI sequences in
   stdout or `--log-file`; an explicit `--color always` affects stdout only,
   never the persistent log.
