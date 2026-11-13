@@ -132,6 +132,12 @@ Both include partially observed current jobs/blocks. Detailed mode adds the
 target-weighted expected shares per block: the sum of `covered hashes / share
 difficulty` for each observed job.
 
+`Found` means a locally verified full-target ProgPow share. It is distinct from
+shares submitted to, or accepted by, the endpoint. `ProgPow block` means a
+distinct observed consensus-selected ProgPow height, not a 15-second template
+refresh; unsupported algorithms are excluded. These are session averages and
+are probabilistic monitoring values, not difficulty controls.
+
 ## Troubleshooting
 
 - **`idle` / RandomX or Cuckoo:** normal. The node selected a different

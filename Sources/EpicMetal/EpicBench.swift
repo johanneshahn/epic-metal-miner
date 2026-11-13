@@ -294,6 +294,10 @@ struct EpicBenchConfig {
     var minutes: Double = 10
     var groups: UInt32 = 4096               // threadgroups per dispatch
     var threadsPerGroup: UInt32 = 256
+    /// Command buffers allowed on the GPU simultaneously. Mining uses one
+    /// synchronous dispatch; the default benchmark measures saturated GPU
+    /// throughput with eight.
+    var inflight: Int = 8
     var headerHex: String? = nil
     var targetHex: String? = nil
     var sampleSeconds: Double = 30
@@ -312,6 +316,7 @@ func runEpicBenchmark(device: MTLDevice, config: EpicBenchConfig) throws -> Int 
     print("height:        \(config.height)  (epoch \(epoch), prog_seed \(period))")
     print("duration:      \(config.minutes) min   sample every \(Int(config.sampleSeconds))s")
     print("dispatch:      \(config.groups) threadgroups x \(config.threadsPerGroup) threads = \(UInt64(config.groups) * UInt64(config.threadsPerGroup)) hashes")
+    print("in flight:     \(config.inflight) command buffer\(config.inflight == 1 ? "" : "s")")
 
     // Header hash: explicit, else the live-vector header, else the known tip hash.
     let headerHex = config.headerHex
@@ -397,8 +402,11 @@ func runEpicBenchmark(device: MTLDevice, config: EpicBenchConfig) throws -> Int 
     }
     let threadsPerGroup = config.threadsPerGroup
     let hashesPerDispatch = UInt64(config.groups) * UInt64(threadsPerGroup)
-    let inflight = 8
-    let sem = DispatchSemaphore(value: inflight)
+    guard config.inflight > 0 else {
+        FileHandle.standardError.write("--inflight must be at least 1\n".data(using: .utf8)!)
+        return 2
+    }
+    let sem = DispatchSemaphore(value: config.inflight)
     var baseNonce: UInt64 = 0
 
     func encode(_ cb: MTLCommandBuffer) {
@@ -427,11 +435,11 @@ func runEpicBenchmark(device: MTLDevice, config: EpicBenchConfig) throws -> Int 
         baseNonce += hashesPerDispatch
     }
 
-    func drain() { for _ in 0..<inflight { sem.wait() } }
+    func drain() { for _ in 0..<config.inflight { sem.wait() } }
 
     // --- warm-up (not counted) -------------------------------------------
     print("\n--- warm-up ---")
-    for _ in 0..<inflight {
+    for _ in 0..<config.inflight {
         let cb = queue.makeCommandBuffer()!
         cb.addCompletedHandler { _ in sem.signal() }
         encode(cb)

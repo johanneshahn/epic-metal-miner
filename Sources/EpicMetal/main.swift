@@ -38,8 +38,9 @@ func usage() -> Never {
       bench [options]        sustained GPU hashrate benchmark (real epoch, pre-validated)
                                --height N     block height (default 3795484, live tip)
                                --minutes F    run duration (default 10)
-                               --groups N     threadgroups per dispatch (default 4096)
-                               --threads N    threads per threadgroup (must be 256)
+                                --groups N     threadgroups per dispatch (default 4096)
+                                --threads N    threads per threadgroup (must be 256)
+                                --inflight N   command buffers in flight (default 8; use 1 to match mining)
                                --header HEX   32-byte header hash
                                --target HEX   share target (default 0 = never wins)
                                --sample F     telemetry sample interval seconds (default 30)
@@ -177,6 +178,7 @@ do {
             case "--minutes": cfg.minutes = Double(args[i + 1])!; i += 2
             case "--groups":  cfg.groups = UInt32(args[i + 1])!; i += 2
             case "--threads": cfg.threadsPerGroup = UInt32(args[i + 1])!; i += 2
+            case "--inflight": cfg.inflight = Int(args[i + 1])!; i += 2
             case "--header":  cfg.headerHex = args[i + 1]; i += 2
             case "--target":  cfg.targetHex = args[i + 1]; i += 2
             case "--sample":  cfg.sampleSeconds = Double(args[i + 1])!; i += 2

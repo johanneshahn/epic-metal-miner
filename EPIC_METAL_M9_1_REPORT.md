@@ -70,5 +70,15 @@ post-fix dry run does not plateau.
 - the cumulative identity above;
 - repeated ProgPow template refresh at the same height (not a new block).
 
-The M9.1 60-minute no-submit run is in progress. Its final memory and
-mathematical-consistency measurements will be appended after completion.
+## Interrupted no-submit validation run
+
+The planned 60-minute no-submit run stopped after 40:11 when the local node
+disconnected, briefly refused connections, and subsequently replied that it was
+syncing. It covered 5,229,969,718 hashes; active average was 7.38 MH/s,
+effective session was 2.17 MH/s, and ProgPow active utilization was 29.4%.
+The cumulative identity holds after rounding: `7.38 × 0.294 ≈ 2.17`.
+
+There were zero submissions, accepts, rejects, or stale shares; the client
+reported five reconnects. RSS rose from about 2114.8 MiB after DAG setup to
+2120.6 MiB during the recorded run. This interrupted observation is not enough
+to attribute the change or claim a leak fix.
