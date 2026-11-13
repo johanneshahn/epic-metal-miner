@@ -115,14 +115,16 @@ final class MinerTerminal {
 
 func compactDashboard(connection: Bool, algorithm: String, height: UInt64?, epoch: UInt64?, uptime: TimeInterval,
                       recentActiveMHps: Double, cumulativeActiveMHps: Double, effectiveMHps: Double,
-                      power: Double?, efficiency: Double?, memoryBytes: UInt64?,
+                      power: Double?, averagePower: Double?, efficiency: Double?, sessionEfficiency: Double?, memoryBytes: UInt64?,
                       snapshot: MiningPerformanceSnapshot, stats: EpicMiningStats, jobShares: EpicJobShareStats?,
                       lastCompletedJob: String, acceptedPerProgpowBlock: Double,
                       foundPerProgpowBlock: Double, foundPerJob: Double, expectedPerProgpowBlock: Double,
                       lastEvent: String, recentEvents: [String],
                       mode: EpicDashboardMode, narrow: Bool) -> String {
     let powerText = power.map { String(format: "%.1f W", $0) } ?? "unavailable"
+    let averagePowerText = averagePower.map { String(format: "%.1f W", $0) } ?? "unavailable"
     let efficiencyText = efficiency.map { String(format: "%.2f MH/s/W", $0) } ?? "unavailable"
+    let sessionEfficiencyText = sessionEfficiency.map { String(format: "%.2f MH/s/W", $0) } ?? "unavailable"
     let memoryText = memoryBytes.map { String(format: "%.1f MiB", Double($0) / 1_048_576) } ?? "unavailable"
     let state = algorithm == "ProgPow" ? "● MINING" : "● WAITING — \(algorithm) block"
     let activity = recentEvents.isEmpty ? "  —" : recentEvents.map { "  \($0)" }.joined(separator: "\n")
@@ -145,8 +147,10 @@ func compactDashboard(connection: Bool, algorithm: String, height: UInt64?, epoc
 
       Effective session  \(String(format: "%.2f MH/s", effectiveMHps))
       Active average     \(String(format: "%.2f MH/s", cumulativeActiveMHps))
-      GPU power          \(powerText)
-      Efficiency         \(efficiencyText)
+      GPU power (recent) \(powerText)
+      GPU power (average) \(averagePowerText)
+      Efficiency (recent) \(efficiencyText)
+      Efficiency (session) \(sessionEfficiencyText)
       ProgPow time       \(String(format: "%.1f%%", snapshot.activeUtilization * 100))
 
       ───────────────────────────────────────────────────────────
