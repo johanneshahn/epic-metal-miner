@@ -107,6 +107,11 @@ Representative compact view:
   ProgPow time       46.1%
 ```
 
+Compact mode displays locally valid `Shares / ProgPow block` and `Shares / job`.
+Both include partially observed current jobs/blocks. Detailed mode adds the
+target-weighted expected shares per block: the sum of `covered hashes / share
+difficulty` for each observed job.
+
 ## Troubleshooting
 
 - **`idle` / RandomX or Cuckoo:** normal. The node selected a different

@@ -45,13 +45,15 @@ final class MinerTerminal {
     }
     var recentActivity: [String] { recent }
 
-    func event(_ level: MinerEventLevel, subsystem: String, _ message: String, console: Bool = true) {
+    func event(_ level: MinerEventLevel, subsystem: String, _ message: String, console: Bool = true, activity: Bool = true) {
         let plain = "\(timestamp()) \(level.rawValue.padding(toLength: 5, withPad: " ", startingAt: 0)) \(subsystem.padding(toLength: 8, withPad: " ", startingAt: 0)) \(message)"
         if let data = (plain + "\n").data(using: .utf8) { try? logHandle?.write(contentsOf: data) }
-        let shortTime = String(timestamp().suffix(8))
-        let symbol: String = level == .error ? "✕" : level == .warn ? "●" : "✓"
-        recent.append("\(shortTime)  \(symbol) \(message)")
-        if recent.count > 4 { recent.removeFirst(recent.count - 4) }
+        if activity {
+            let shortTime = String(timestamp().suffix(8))
+            let symbol: String = level == .error ? "✕" : level == .warn ? "●" : "✓"
+            recent.append("\(shortTime)  \(symbol) \(message)")
+            if recent.count > 4 { recent.removeFirst(recent.count - 4) }
+        }
         guard console, !interactive else { return }
         print(colorize(level, plain))
     }
@@ -116,7 +118,8 @@ func compactDashboard(connection: Bool, algorithm: String, height: UInt64?, epoc
                       power: Double?, efficiency: Double?, memoryBytes: UInt64?,
                       snapshot: MiningPerformanceSnapshot, stats: EpicMiningStats, jobShares: EpicJobShareStats?,
                       lastCompletedJob: String, acceptedPerProgpowBlock: Double,
-                      foundPerProgpowBlock: Double, lastEvent: String, recentEvents: [String],
+                      foundPerProgpowBlock: Double, foundPerJob: Double, expectedPerProgpowBlock: Double,
+                      lastEvent: String, recentEvents: [String],
                       mode: EpicDashboardMode, narrow: Bool) -> String {
     let powerText = power.map { String(format: "%.1f W", $0) } ?? "unavailable"
     let efficiencyText = efficiency.map { String(format: "%.2f MH/s/W", $0) } ?? "unavailable"
@@ -157,6 +160,8 @@ func compactDashboard(connection: Bool, algorithm: String, height: UInt64?, epoc
       ───────────────────────────────────────────────────────────
 
       SHARES             \(stats.accepted) accepted   \(stats.rejected) rejected   \(stats.stale) stale
+      Shares / ProgPow block   \(String(format: "%.2f", foundPerProgpowBlock))
+      Shares / job             \(String(format: "%.2f", foundPerJob))
 
       ───────────────────────────────────────────────────────────
 
@@ -176,6 +181,7 @@ func compactDashboard(connection: Bool, algorithm: String, height: UInt64?, epoc
           Reconnect          \(formatDuration(snapshot.reconnectSeconds))
           ProgPow blocks     \(stats.progpowBlocks)
           Shares/block       accepted \(String(format: "%.2f", acceptedPerProgpowBlock)) · found \(String(format: "%.2f", foundPerProgpowBlock))
+          Expected/block     \(String(format: "%.2f", expectedPerProgpowBlock))
           This job           \(jobShares?.summary ?? "—")
           Previous job       \(lastCompletedJob)
         """

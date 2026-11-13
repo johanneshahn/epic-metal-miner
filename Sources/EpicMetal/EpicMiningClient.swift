@@ -30,6 +30,7 @@ struct EpicMiningStats {
     var accepted = 0
     var rejected = 0
     var stale = 0
+    var jobs = 0
     var unknown = 0
     var reconnects = 0
     /// Consensus-selected ProgPow heights observed this session. Template
@@ -46,9 +47,11 @@ struct EpicJobShareStats {
     var accepted = 0
     var rejected = 0
     var stale = 0
+    var hashes: UInt64 = 0
+    var expectedShares = 0.0
 
     var summary: String {
-        "height=\(height) job=\(jobID) found=\(found) submitted=\(submitted) accepted=\(accepted) rejected=\(rejected) stale=\(stale)"
+        "height=\(height) job=\(jobID) found=\(found) expected=\(String(format: "%.2f", expectedShares)) submitted=\(submitted) accepted=\(accepted) rejected=\(rejected) stale=\(stale)"
     }
 }
 
@@ -76,6 +79,7 @@ final class EpicMiningClient {
     private var statusRequestOutstanding = false
     private var stats = EpicMiningStats()
     private var performance = MiningPerformance()
+    private var shareAccounting = ProgpowShareAccounting()
     private var pendingSubmissions = 0
     private var lastShareReport = -Double.infinity
     // Nonces need only be remembered for the active template. Once a template
@@ -169,6 +173,12 @@ final class EpicMiningClient {
             let dispatchSeconds = monotonicNow() - dispatchStarted
             nonce = result.nextNonce
             performance.recordHashBatch(hashes: result.hashesCovered, activeSeconds: dispatchSeconds)
+            let difficulty = try job.template.shareDifficulty(for: .progpow)
+            shareAccounting.recordHashes(result.hashesCovered, difficulty: difficulty)
+            if activeJobShares?.fingerprint == job.fingerprint {
+                activeJobShares?.hashes &+= result.hashesCovered
+                activeJobShares?.expectedShares += Double(result.hashesCovered) / Double(difficulty)
+            }
             intervalHashes &+= result.hashesCovered
             intervalActiveSeconds += dispatchSeconds
 
@@ -256,7 +266,8 @@ final class EpicMiningClient {
                 pendingSubmissions = max(0, pendingSubmissions - 1)
                 stats.accepted += 1
                 recordShareResponse(request?.jobFingerprint, outcome: .accepted)
-                event(.info, subsystem: "SHARE", "Accepted | total=\(stats.accepted) response=\(result)")
+                event(.info, subsystem: "SHARE", "Share accepted")
+                log(.verbose, "accepted share total=\(stats.accepted) response=\(result)")
             } else if requestMethod == "status" {
                 log(.verbose, "server status: \(message["result"] ?? "missing")")
             }
@@ -264,11 +275,13 @@ final class EpicMiningClient {
     }
 
     private func install(template: EpicJobTemplate) throws {
-        finishActiveJob()
-        invalidateJob()
         guard template.algorithm == EpicAlgorithm.progpow.rawValue else {
+            finishActiveJob()
+            invalidateJob()
             if displayedAlgorithm != template.algorithm || displayedHeight != template.height {
-                event(.warn, subsystem: "MINING", "Paused | algorithm=\(template.algorithm) height=\(template.height)")
+                let displayAlgorithm = template.algorithm == "randomx" ? "RandomX" : template.algorithm.capitalized
+                event(.warn, subsystem: "MINING", "Waiting · \(displayAlgorithm) block")
+                log(.verbose, "paused algorithm=\(template.algorithm) height=\(template.height)")
                 displayedAlgorithm = template.algorithm
                 displayedHeight = template.height
             } else {
@@ -276,16 +289,28 @@ final class EpicMiningClient {
             }
             return
         }
+        // Identical notification: retain the active generation and nonce range.
+        // A different pre-PoW at the same height is intentionally a new job.
+        let fingerprint = try template.fingerprint()
+        if active?.fingerprint == fingerprint {
+            log(.verbose, "duplicate ProgPow job notification ignored")
+            return
+        }
+        finishActiveJob()
+        invalidateJob()
         let job = try EpicMiningJob(generation: generation, template: template)
         if progpowBlockTracker.observe(height: template.height) {
             stats.progpowBlocks += 1
         }
         active = job
         activeJobShares = EpicJobShareStats(fingerprint: job.fingerprint, height: template.height, jobID: template.jobID)
+        stats.jobs += 1
+        shareAccounting.observeJob(height: template.height)
         nonce = UInt64.random(in: UInt64.min...UInt64.max)
         let shareDifficulty = try template.shareDifficulty(for: .progpow)
         if displayedAlgorithm != template.algorithm || displayedHeight != template.height {
-            event(.info, subsystem: "MINING", "ProgPow started | height=\(template.height) epoch=\(job.epoch) share_diff=\(shareDifficulty)")
+            event(.info, subsystem: "MINING", "Mining started · Block #\(template.height)")
+            log(.verbose, "ProgPow started height=\(template.height) epoch=\(job.epoch) share_diff=\(shareDifficulty)")
             displayedAlgorithm = template.algorithm
             displayedHeight = template.height
         } else {
@@ -348,6 +373,7 @@ final class EpicMiningClient {
     private func handleLocallyValid(_ candidate: EpicGpuCandidate, job: EpicMiningJob) throws {
         let mix = wordsToBytesLE(candidate.mixWords)
         if activeJobShares?.fingerprint == job.fingerprint { activeJobShares?.found += 1 }
+        shareAccounting.recordFoundShare()
         if monotonicNow() - lastShareReport >= 2 {
             log(.verbose, "locally valid GPU share nonce=\(candidate.nonce) mix=\(bytesToHex(mix))")
             lastShareReport = monotonicNow()
@@ -418,7 +444,9 @@ final class EpicMiningClient {
         let memoryText = memoryBytes.map { String(format: "%.1f MiB", Double($0) / 1_048_576) } ?? "unavailable"
         let efficiency = watts.flatMap { $0 > 0 && activeCoverage >= 0.8 ? currentMH / $0 : nil }
         let acceptedPerBlock = stats.progpowBlocks > 0 ? Double(stats.accepted) / Double(stats.progpowBlocks) : 0
-        let foundPerBlock = stats.progpowBlocks > 0 ? Double(stats.locallyValidShares) / Double(stats.progpowBlocks) : 0
+        let foundPerBlock = shareAccounting.foundPerBlock
+        let foundPerJob = shareAccounting.foundPerJob
+        let expectedPerBlock = shareAccounting.expectedPerBlock
         if terminal.isInteractive {
             terminal.dashboard(compactDashboard(connection: connected, algorithm: "ProgPow", height: job.template.height,
                                                 epoch: job.epoch, uptime: uptime, recentActiveMHps: currentMH,
@@ -427,16 +455,17 @@ final class EpicMiningClient {
                                                 memoryBytes: memoryBytes, snapshot: snapshot, stats: stats,
                                                 jobShares: activeJobShares, lastCompletedJob: lastCompletedJob,
                                                 acceptedPerProgpowBlock: acceptedPerBlock,
-                                                foundPerProgpowBlock: foundPerBlock, lastEvent: lastEvent,
+                                                foundPerProgpowBlock: foundPerBlock, foundPerJob: foundPerJob,
+                                                expectedPerProgpowBlock: expectedPerBlock, lastEvent: lastEvent,
                                                 recentEvents: terminal.recentActivity, mode: config.dashboardMode,
                                                 narrow: terminal.columns < 72))
             return
         }
-        print(String(format: "[miner] status=%@ uptime=%@ height=%llu epoch=%llu algorithm=progpow share_diff=%llu active_recent=%.2f MH/s active_average=%.2f MH/s effective_session=%.2f MH/s active_time=%.1f%% idle=%.1fs prep=%.1fs reconnect=%.1fs gpu_power=%@ efficiency=%@ memory=%@ job_shares=%@ progpow_blocks=%d accepted_per_block=%.2f found_per_block=%.2f accepted=%d rejected=%d stale=%d unknown=%d reconnects=%d",
+        print(String(format: "[miner] status=%@ uptime=%@ height=%llu epoch=%llu algorithm=progpow share_diff=%llu active_recent=%.2f MH/s active_average=%.2f MH/s effective_session=%.2f MH/s active_time=%.1f%% idle=%.1fs prep=%.1fs reconnect=%.1fs gpu_power=%@ efficiency=%@ memory=%@ job_shares=%@ progpow_blocks=%d found_per_block=%.2f found_per_job=%.2f expected_per_block=%.2f accepted_per_block=%.2f accepted=%d rejected=%d stale=%d unknown=%d reconnects=%d",
                      connected ? "connected" : "disconnected", formatDuration(uptime), job.template.height, job.epoch,
                      (try? job.template.shareDifficulty(for: .progpow)) ?? 0, currentMH, snapshot.activeMHps, snapshot.effectiveMHps,
                      snapshot.activeUtilization * 100, snapshot.algorithmIdleSeconds, snapshot.preparationSeconds,
-                     snapshot.reconnectSeconds, powerText, efficiencyText, memoryText, activeJobShares?.summary ?? "none", stats.progpowBlocks, acceptedPerBlock, foundPerBlock, stats.accepted, stats.rejected,
+                     snapshot.reconnectSeconds, powerText, efficiencyText, memoryText, activeJobShares?.summary ?? "none", stats.progpowBlocks, foundPerBlock, foundPerJob, expectedPerBlock, acceptedPerBlock, stats.accepted, stats.rejected,
                      stats.stale, stats.unknown, stats.reconnects))
     }
 
@@ -457,7 +486,8 @@ final class EpicMiningClient {
     private func log(_ level: EpicLogVerbosity, _ text: String) {
         let rank: [EpicLogVerbosity: Int] = [.quiet: 0, .normal: 1, .verbose: 2]
         if (rank[config.verbosity] ?? 1) >= (rank[level] ?? 1) {
-            terminal.event(level == .verbose ? .debug : .info, subsystem: "MINER", text)
+            terminal.event(level == .verbose ? .debug : .info, subsystem: "MINER", text,
+                           activity: level != .verbose)
         }
     }
 }

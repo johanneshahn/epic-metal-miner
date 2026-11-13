@@ -76,6 +76,38 @@ struct ProgpowBlockTracker {
     }
 }
 
+/// Session-only share accounting. Jobs and blocks currently in progress are
+/// deliberately included in averages; this is stated in the dashboard/docs.
+struct ProgpowShareAccounting {
+    private(set) var jobs = 0
+    private(set) var blocks = 0
+    private(set) var foundShares = 0
+    private(set) var expectedShares = 0.0
+    private var lastBlockHeight: UInt64?
+
+    mutating func observeJob(height: UInt64) {
+        jobs += 1
+        if lastBlockHeight != height {
+            blocks += 1
+            lastBlockHeight = height
+        }
+    }
+
+    mutating func recordHashes(_ hashes: UInt64, difficulty: UInt64) {
+        guard difficulty > 0 else { return }
+        // Epic accepts H <= floor((2^256 - 1) / D). For a uniform 256-bit
+        // hash, p = (floor((2^256 - 1)/D) + 1) / 2^256, which is 1/D to
+        // Double precision. Sum each job separately when difficulty changes.
+        expectedShares += Double(hashes) / Double(difficulty)
+    }
+
+    mutating func recordFoundShare() { foundShares += 1 }
+
+    var foundPerJob: Double { jobs > 0 ? Double(foundShares) / Double(jobs) : 0 }
+    var foundPerBlock: Double { blocks > 0 ? Double(foundShares) / Double(blocks) : 0 }
+    var expectedPerBlock: Double { blocks > 0 ? expectedShares / Double(blocks) : 0 }
+}
+
 /// Deterministic regression checks for active/effective accounting across
 /// startup preparation, algorithm idle, reconnect delay and shutdown.
 func runMiningStatisticsSelfTest() throws {
@@ -115,6 +147,21 @@ func runMiningStatisticsSelfTest() throws {
     guard blocks.observe(height: 100), !blocks.observe(height: 100),
           blocks.observe(height: 101), blocks.count == 2 else {
         throw EpicMiningError.malformedMessage("ProgPow block/template refresh regression")
+    }
+    var shares = ProgpowShareAccounting()
+    shares.observeJob(height: 100) // partially observed block/job included
+    shares.recordHashes(200_000_000, difficulty: 100_000_000)
+    shares.recordFoundShare()
+    shares.observeJob(height: 100)
+    shares.recordHashes(100_000_000, difficulty: 50_000_000)
+    shares.recordFoundShare()
+    shares.observeJob(height: 101)
+    guard shares.jobs == 3, shares.blocks == 2, shares.foundShares == 2,
+          abs(shares.expectedShares - 4) < 0.0001,
+          abs(shares.foundPerJob - (2.0 / 3.0)) < 0.0001,
+          abs(shares.foundPerBlock - 1) < 0.0001,
+          abs(shares.expectedPerBlock - 2) < 0.0001 else {
+        throw EpicMiningError.malformedMessage("share expectation/accounting regression")
     }
     print("Mining statistics self-test: PASS")
 }
