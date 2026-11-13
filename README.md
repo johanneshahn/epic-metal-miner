@@ -17,8 +17,28 @@ back to CPU mining or another proof-of-work algorithm.
 
 Requirements: macOS 13+, Xcode/Metal command-line tools, and Swift 5.9+.
 
+### First-time macOS setup
+
+You do **not** need to install Swift separately. Apple ships Swift and the
+Metal compiler with the Xcode Command Line Tools. In Terminal, install them:
+
 ```sh
-cd epic-metal
+xcode-select --install
+```
+
+Complete the macOS installer dialog, then verify the tools are available:
+
+```sh
+swift --version
+xcrun --find metal
+```
+
+If either command fails after installation, restart Terminal and run the
+commands again. A Metal-capable Apple Silicon Mac and macOS 13 or newer are
+required. This project currently builds from source; it does not provide a
+prebuilt binary release.
+
+```sh
 swift build -c release
 ```
 
