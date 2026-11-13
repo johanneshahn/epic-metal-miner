@@ -89,7 +89,8 @@ final class MinerTerminal {
 }
 
 func compactDashboard(connection: Bool, algorithm: String, height: UInt64?, epoch: UInt64?, uptime: TimeInterval,
-                      activeMHps: Double, effectiveMHps: Double, power: Double?, efficiency: Double?, memoryBytes: UInt64?,
+                      recentActiveMHps: Double, cumulativeActiveMHps: Double, effectiveMHps: Double,
+                      power: Double?, efficiency: Double?, memoryBytes: UInt64?,
                       snapshot: MiningPerformanceSnapshot, stats: EpicMiningStats, jobShares: EpicJobShareStats?,
                       lastCompletedJob: String, acceptedPerProgpowBlock: Double,
                       foundPerProgpowBlock: Double, lastEvent: String) -> String {
@@ -106,8 +107,9 @@ func compactDashboard(connection: Bool, algorithm: String, height: UInt64?, epoc
     Uptime         \(formatDuration(uptime))
 
     PERFORMANCE
-    Active         \(String(format: "%.2f MH/s", activeMHps))
-    Effective      \(String(format: "%.2f MH/s", effectiveMHps))
+    Active (recent) \(String(format: "%.2f MH/s", recentActiveMHps))
+    Active (average) \(String(format: "%.2f MH/s", cumulativeActiveMHps))
+    Effective (session) \(String(format: "%.2f MH/s", effectiveMHps))
     GPU power      \(powerText)  (GPU only)
     Efficiency     \(efficiencyText)
     Process RSS    \(memoryText)

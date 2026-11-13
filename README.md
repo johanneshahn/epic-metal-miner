@@ -75,6 +75,9 @@ Unavailable telemetry is printed as `unavailable`; it is never estimated.
 Active hashrate is measured only over completed ProgPow GPU dispatches.
 Effective hashrate divides completed hashes by full monotonic session time,
 including DAG preparation, reconnects, and non-ProgPow idle time.
+The dashboard distinguishes **Active (recent)** from **Active (average)**;
+only the cumulative average can be multiplied by cumulative utilization to
+reproduce **Effective (session)**.
 
 The dashboard reports `This job` counters for full-target-valid ProgPow shares
 found on the active template, plus the completed previous-job summary. Use
