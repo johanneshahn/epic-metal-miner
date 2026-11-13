@@ -44,7 +44,7 @@ final class MinerTerminal {
         guard interactive else { return }
         // Home + clear is robust against resize/narrow terminals; it does not
         // emit escapes when output is redirected.
-        print("\u{001B}[H\u{001B}[2J\(text)", terminator: "")
+        print("\u{001B}[H\u{001B}[2J\(decorateDashboard(text))", terminator: "")
         dashboardDrawn = true
     }
 
@@ -64,6 +64,20 @@ final class MinerTerminal {
         case .debug: code = "36"
         }
         return "\u{001B}[\(code)m\(text)\u{001B}[0m"
+    }
+
+    private func decorateDashboard(_ text: String) -> String {
+        guard colors else { return text }
+        func paint(_ value: String, _ code: String) -> String { "\u{001B}[\(code)m\(value)\u{001B}[0m" }
+        return text
+            .replacingOccurrences(of: "Epic Metal Miner", with: paint("Epic Metal Miner", "36"))
+            .replacingOccurrences(of: "LIVE", with: paint("LIVE", "32"))
+            .replacingOccurrences(of: "Connected", with: paint("Connected", "32"))
+            .replacingOccurrences(of: "Disconnected", with: paint("Disconnected", "31"))
+            .replacingOccurrences(of: "ProgPow", with: paint("ProgPow", "34"))
+            .replacingOccurrences(of: "PERFORMANCE", with: paint("PERFORMANCE", "36"))
+            .replacingOccurrences(of: "MINING TIME", with: paint("MINING TIME", "36"))
+            .replacingOccurrences(of: "SHARES", with: paint("SHARES", "36"))
     }
 
     private func timestamp() -> String {
