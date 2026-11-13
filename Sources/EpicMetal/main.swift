@@ -33,6 +33,7 @@ func usage() -> Never {
                                 --duration SEC    stop after this duration (testing only)
                                 --log LEVEL       quiet, normal (default), or verbose
                                 --color MODE      auto (default), always, or never
+                                --dashboard MODE  compact (default) or detailed (interactive TTY only)
                                 --log-file PATH   write timestamped plain-text event log
       bench [options]        sustained GPU hashrate benchmark (real epoch, pre-validated)
                                --height N     block height (default 3795484, live tip)
@@ -98,6 +99,7 @@ do {
         var duration: TimeInterval?
         var verbosity: EpicLogVerbosity = .normal
         var colorMode: EpicColorMode = .auto
+        var dashboardMode: EpicDashboardMode = .compact
         var logFile: String?
         var i = 3
         while i < args.count {
@@ -133,6 +135,10 @@ do {
                 guard i + 1 < args.count, let value = EpicColorMode(rawValue: args[i + 1]) else { usage() }
                 colorMode = value
                 i += 2
+            case "--dashboard":
+                guard i + 1 < args.count, let value = EpicDashboardMode(rawValue: args[i + 1]) else { usage() }
+                dashboardMode = value
+                i += 2
             case "--log-file":
                 guard i + 1 < args.count else { usage() }
                 logFile = args[i + 1]
@@ -147,7 +153,8 @@ do {
         }
         let miningConfig = EpicMiningConfig(endpoint: args[2], worker: worker, password: password, submitShares: submit,
                                             maximumShares: maximumShares, statisticsInterval: statisticsInterval,
-                                            duration: duration, verbosity: verbosity, colorMode: colorMode, logFile: logFile)
+                                            duration: duration, verbosity: verbosity, colorMode: colorMode,
+                                            dashboardMode: dashboardMode, logFile: logFile)
         try EpicMiningClient(device: device, config: miningConfig).run()
         exit(0)
 

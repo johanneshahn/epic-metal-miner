@@ -17,6 +17,7 @@ struct EpicMiningConfig {
     let duration: TimeInterval?
     let verbosity: EpicLogVerbosity
     let colorMode: EpicColorMode
+    let dashboardMode: EpicDashboardMode
     let logFile: String?
 }
 
@@ -426,7 +427,9 @@ final class EpicMiningClient {
                                                 memoryBytes: memoryBytes, snapshot: snapshot, stats: stats,
                                                 jobShares: activeJobShares, lastCompletedJob: lastCompletedJob,
                                                 acceptedPerProgpowBlock: acceptedPerBlock,
-                                                foundPerProgpowBlock: foundPerBlock, lastEvent: lastEvent))
+                                                foundPerProgpowBlock: foundPerBlock, lastEvent: lastEvent,
+                                                recentEvents: terminal.recentActivity, mode: config.dashboardMode,
+                                                narrow: terminal.columns < 72))
             return
         }
         print(String(format: "[miner] status=%@ uptime=%@ height=%llu epoch=%llu algorithm=progpow share_diff=%llu active_recent=%.2f MH/s active_average=%.2f MH/s effective_session=%.2f MH/s active_time=%.1f%% idle=%.1fs prep=%.1fs reconnect=%.1fs gpu_power=%@ efficiency=%@ memory=%@ job_shares=%@ progpow_blocks=%d accepted_per_block=%.2f found_per_block=%.2f accepted=%d rejected=%d stale=%d unknown=%d reconnects=%d",

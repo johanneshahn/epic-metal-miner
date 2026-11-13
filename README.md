@@ -7,7 +7,8 @@ back to CPU mining or another proof-of-work algorithm.
 ## Status and safety
 
 - Official ProgPow 0.9.2 GPU vectors: **12/12 pass**.
-- Mainnet integration: controlled shares have been accepted by an Epic node.
+- Mainnet integration: three controlled, authorized shares were accepted by a
+  local Epic node; details are in `EPIC_METAL_PROGRESS.md`.
 - Mining is dry-run by default. `--submit` is required to send a share.
 - Only a template whose returned `algorithm` is exactly `progpow` is mined.
   RandomX, Cuckoo, and unknown jobs safely idle the miner.
@@ -17,6 +18,7 @@ back to CPU mining or another proof-of-work algorithm.
 Requirements: macOS 13+, Xcode/Metal command-line tools, and Swift 5.9+.
 
 ```sh
+cd epic-metal
 swift build -c release
 ```
 
@@ -59,37 +61,51 @@ select any Epic algorithm for a height, so passing `progpow` to
 |---|---:|---|
 | `ENDPOINT` | required | `HOST:PORT` Epic Stratum endpoint |
 | `--worker ID` | `epic-metal` | Stratum worker identity |
-| `--password TEXT` | `x` | Stratum password required by the selected endpoint |
+| `--password TEXT` | `x` | Stratum password; MineFleet specifies `x` |
 | `--submit` | off | Send locally valid shares |
 | `--max-shares N` | unlimited | Stop after N submitted shares; `0` means unlimited |
 | `--stats SECONDS` | `15` | Periodic status interval |
 | `--duration SEC` | unlimited | Stop after a controlled test duration |
 | `--log LEVEL` | `normal` | `quiet`, `normal`, or `verbose` |
-| `--color MODE` | `auto` | `auto`, `always`, or `never`; auto honors `NO_COLOR` |
+| `--color MODE` | `auto` | `auto`, `always`, or `never`; `NO_COLOR` disables auto color |
+| `--dashboard MODE` | `compact` | Interactive `compact` or `detailed` dashboard |
 | `--log-file PATH` | none | Timestamped plain-text event log; parent directory is created |
 
 The status line reports dispatch-measured current and average hashrate,
 IOReport GPU power and MH/s/W when macOS exposes them, OS-reported resident
 memory, current height/epoch/share difficulty, and share/reconnect counters.
 Unavailable telemetry is printed as `unavailable`; it is never estimated.
-Active hashrate is measured only over completed ProgPow GPU dispatches.
-Effective hashrate divides completed hashes by full monotonic session time,
-including DAG preparation, reconnects, and non-ProgPow idle time.
-The dashboard distinguishes **Active (recent)** from **Active (average)**;
-only the cumulative average can be multiplied by cumulative utilization to
-reproduce **Effective (session)**.
+`Active` hashrate is measured only over completed ProgPow GPU dispatches.
+`Effective` hashrate divides the same completed hashes by the full monotonic
+session duration, including DAG preparation, reconnects and non-ProgPow idle.
+When stdout is interactive, a compact dashboard refreshes at the statistics
+interval; redirected output remains plain text without ANSI escapes.
 
-The dashboard reports `This job` counters for full-target-valid ProgPow shares
-found on the active template, plus the completed previous-job summary. Use
-these measured counts—not a nominal hash rate—to tune a node's minimum share
-difficulty. One share per job is a probabilistic target, not a guarantee.
+### Dashboard modes
 
-`ProgPow blocks` counts distinct consensus-selected ProgPow heights observed
-in the session, not template refreshes. `Accepted/block` and `Found/block`
-are session averages divided by that count.
+The default compact dashboard emphasizes the recent active hashrate, effective
+session rate, GPU power, mining time, connection state, share totals, and four
+recent meaningful events. Use `--dashboard detailed` for process RSS, epoch,
+total hashes, active/idle/preparation/reconnect time, shares-per-block, and
+per-job diagnostics. Both dashboards automatically use a narrow layout below
+72 terminal columns.
 
-See `EPIC_METAL_M9_REPORT.md` for memory-lifetime findings, terminal behavior,
-and the statistics definitions.
+Representative compact view:
+
+```text
+  EPIC METAL MINER                                      ● MINING
+  Apple Silicon · Metal GPU
+  ───────────────────────────────────────────────────────────
+
+                   13.10 MH/s
+                   ACTIVE HASHRATE (RECENT)
+
+  Effective session  5.00 MH/s
+  Active average    10.85 MH/s
+  GPU power          29.8 W
+  Efficiency         0.44 MH/s/W
+  ProgPow time       46.1%
+```
 
 ## Troubleshooting
 
