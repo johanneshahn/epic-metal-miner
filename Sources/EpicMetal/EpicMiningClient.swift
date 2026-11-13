@@ -33,6 +33,30 @@ struct EpicMiningStats {
     var reconnects = 0
 }
 
+struct EpicJobShareStats {
+    let fingerprint: String
+    let height: UInt64
+    let jobID: UInt64
+    var found = 0
+    var submitted = 0
+    var accepted = 0
+    var rejected = 0
+    var stale = 0
+
+    var summary: String {
+        "height=\(height) job=\(jobID) found=\(found) submitted=\(submitted) accepted=\(accepted) rejected=\(rejected) stale=\(stale)"
+    }
+}
+
+private struct EpicPendingRPC {
+    let method: String
+    let jobFingerprint: String?
+}
+
+private enum EpicShareResponse {
+    case accepted, rejected, stale
+}
+
 /// Single-device native Epic ProgPow miner. It never implements CPU mining:
 /// final share checking compares the GPU-produced digest to the full boundary.
 final class EpicMiningClient {
@@ -44,7 +68,7 @@ final class EpicMiningClient {
     private var generation: UInt64 = 0
     private var nonce = UInt64.random(in: UInt64.min...UInt64.max)
     private var requestCounter: UInt64 = 0
-    private var requestMethods = [String: String]()
+    private var requestMethods = [String: EpicPendingRPC]()
     private var stats = EpicMiningStats()
     private var performance = MiningPerformance()
     private var pendingSubmissions = 0
@@ -57,6 +81,8 @@ final class EpicMiningClient {
     private var lastEvent = "Starting"
     private var displayedAlgorithm: String?
     private var displayedHeight: UInt64?
+    private var activeJobShares: EpicJobShareStats?
+    private var lastCompletedJob = "No completed ProgPow job yet"
 
     init(device: MTLDevice, config: EpicMiningConfig) throws {
         self.config = config
@@ -178,10 +204,10 @@ final class EpicMiningClient {
         event(.info, subsystem: "STRATUM", "Connected to endpoint")
     }
 
-    private func send(method: String, params: Any?) throws {
+    private func send(method: String, params: Any?, jobFingerprint: String? = nil) throws {
         requestCounter &+= 1
         let id = "native-\(requestCounter)"
-        requestMethods[id] = method
+        requestMethods[id] = EpicPendingRPC(method: method, jobFingerprint: jobFingerprint)
         try socket.sendJSON(epicRPCRequest(id: id, method: method, params: params))
     }
 
@@ -193,7 +219,8 @@ final class EpicMiningClient {
                 continue
             }
             let id = message["id"].map { String(describing: $0) }
-            let requestMethod = id.flatMap { requestMethods.removeValue(forKey: $0) }
+            let request = id.flatMap { requestMethods.removeValue(forKey: $0) }
+            let requestMethod = request?.method
             if let result = message["result"] as? [String: Any], result["pre_pow"] != nil {
                 try install(template: decodeEpicTemplate(result))
                 continue
@@ -202,8 +229,13 @@ final class EpicMiningClient {
                 let text = String(describing: error)
                 if requestMethod == "submit" {
                     pendingSubmissions = max(0, pendingSubmissions - 1)
-                    if text.localizedCaseInsensitiveContains("too late") { stats.stale += 1 }
-                    else { stats.rejected += 1 }
+                    if text.localizedCaseInsensitiveContains("too late") {
+                        stats.stale += 1
+                        recordShareResponse(request?.jobFingerprint, outcome: .stale)
+                    } else {
+                        stats.rejected += 1
+                        recordShareResponse(request?.jobFingerprint, outcome: .rejected)
+                    }
                 }
                 event(requestMethod == "submit" ? .error : .warn, subsystem: "STRATUM", "\(requestMethod ?? "RPC") response: \(text)")
                 continue
@@ -211,6 +243,7 @@ final class EpicMiningClient {
             if requestMethod == "submit", let result = message["result"] {
                 pendingSubmissions = max(0, pendingSubmissions - 1)
                 stats.accepted += 1
+                recordShareResponse(request?.jobFingerprint, outcome: .accepted)
                 event(.info, subsystem: "SHARE", "Accepted | total=\(stats.accepted) response=\(result)")
             } else if requestMethod == "status" {
                 log(.verbose, "server status: \(message["result"] ?? "missing")")
@@ -219,6 +252,7 @@ final class EpicMiningClient {
     }
 
     private func install(template: EpicJobTemplate) throws {
+        finishActiveJob()
         invalidateJob()
         guard template.algorithm == EpicAlgorithm.progpow.rawValue else {
             if displayedAlgorithm != template.algorithm || displayedHeight != template.height {
@@ -232,6 +266,7 @@ final class EpicMiningClient {
         }
         let job = try EpicMiningJob(generation: generation, template: template)
         active = job
+        activeJobShares = EpicJobShareStats(fingerprint: job.fingerprint, height: template.height, jobID: template.jobID)
         nonce = UInt64.random(in: UInt64.min...UInt64.max)
         let shareDifficulty = try template.shareDifficulty(for: .progpow)
         if displayedAlgorithm != template.algorithm || displayedHeight != template.height {
@@ -249,8 +284,27 @@ final class EpicMiningClient {
         submittedNonces.removeAll(keepingCapacity: true)
     }
 
+    private func finishActiveJob() {
+        guard let jobShares = activeJobShares else { return }
+        lastCompletedJob = jobShares.summary
+        if jobShares.found > 0 || config.verbosity == .verbose {
+            event(.info, subsystem: "MINING", "ProgPow job completed | \(jobShares.summary)")
+        }
+        activeJobShares = nil
+    }
+
+    private func recordShareResponse(_ fingerprint: String?, outcome: EpicShareResponse) {
+        guard let fingerprint, activeJobShares?.fingerprint == fingerprint else { return }
+        switch outcome {
+        case .accepted: activeJobShares?.accepted += 1
+        case .rejected: activeJobShares?.rejected += 1
+        case .stale: activeJobShares?.stale += 1
+        }
+    }
+
     private func handleLocallyValid(_ candidate: EpicGpuCandidate, job: EpicMiningJob) throws {
         let mix = wordsToBytesLE(candidate.mixWords)
+        if activeJobShares?.fingerprint == job.fingerprint { activeJobShares?.found += 1 }
         if monotonicNow() - lastShareReport >= 2 {
             log(.verbose, "locally valid GPU share nonce=\(candidate.nonce) mix=\(bytesToHex(mix))")
             lastShareReport = monotonicNow()
@@ -270,8 +324,9 @@ final class EpicMiningClient {
             "nonce": candidate.nonce,
             "pow": ["ProgPow": mix.map(Int.init)],
         ]
-        try send(method: "submit", params: params)
+        try send(method: "submit", params: params, jobFingerprint: job.fingerprint)
         stats.submitted += 1
+        if activeJobShares?.fingerprint == job.fingerprint { activeJobShares?.submitted += 1 }
         pendingSubmissions += 1
         log(.verbose, "submitted \(stats.submitted)\(config.maximumShares.map { "/\($0)" } ?? ""): height=\(job.template.height) job_id=\(job.template.jobID) nonce=\(candidate.nonce)")
     }
@@ -323,14 +378,16 @@ final class EpicMiningClient {
             terminal.dashboard(compactDashboard(connection: connected, algorithm: "ProgPow", height: job.template.height,
                                                 epoch: job.epoch, uptime: uptime, activeMHps: currentMH,
                                                 effectiveMHps: snapshot.effectiveMHps, power: watts, efficiency: efficiency,
-                                                memoryBytes: memoryBytes, snapshot: snapshot, stats: stats, lastEvent: lastEvent))
+                                                memoryBytes: memoryBytes, snapshot: snapshot, stats: stats,
+                                                jobShares: activeJobShares, lastCompletedJob: lastCompletedJob,
+                                                lastEvent: lastEvent))
             return
         }
-        print(String(format: "[miner] status=%@ uptime=%@ height=%llu epoch=%llu algorithm=progpow share_diff=%llu active=%.2f MH/s effective=%.2f MH/s active_time=%.1f%% idle=%.1fs prep=%.1fs reconnect=%.1fs gpu_power=%@ efficiency=%@ memory=%@ accepted=%d rejected=%d stale=%d unknown=%d reconnects=%d",
+        print(String(format: "[miner] status=%@ uptime=%@ height=%llu epoch=%llu algorithm=progpow share_diff=%llu active=%.2f MH/s effective=%.2f MH/s active_time=%.1f%% idle=%.1fs prep=%.1fs reconnect=%.1fs gpu_power=%@ efficiency=%@ memory=%@ job_shares=%@ accepted=%d rejected=%d stale=%d unknown=%d reconnects=%d",
                      connected ? "connected" : "disconnected", formatDuration(uptime), job.template.height, job.epoch,
                      (try? job.template.shareDifficulty(for: .progpow)) ?? 0, currentMH, snapshot.effectiveMHps,
                      snapshot.activeUtilization * 100, snapshot.algorithmIdleSeconds, snapshot.preparationSeconds,
-                     snapshot.reconnectSeconds, powerText, efficiencyText, memoryText, stats.accepted, stats.rejected,
+                     snapshot.reconnectSeconds, powerText, efficiencyText, memoryText, activeJobShares?.summary ?? "none", stats.accepted, stats.rejected,
                      stats.stale, stats.unknown, stats.reconnects))
     }
 

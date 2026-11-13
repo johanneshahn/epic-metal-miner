@@ -76,6 +76,11 @@ Active hashrate is measured only over completed ProgPow GPU dispatches.
 Effective hashrate divides completed hashes by full monotonic session time,
 including DAG preparation, reconnects, and non-ProgPow idle time.
 
+The dashboard reports `This job` counters for full-target-valid ProgPow shares
+found on the active template, plus the completed previous-job summary. Use
+these measured counts—not a nominal hash rate—to tune a node's minimum share
+difficulty. One share per job is a probabilistic target, not a guarantee.
+
 See `EPIC_METAL_M9_REPORT.md` for memory-lifetime findings, terminal behavior,
 and the statistics definitions.
 

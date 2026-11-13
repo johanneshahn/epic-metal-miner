@@ -90,7 +90,8 @@ final class MinerTerminal {
 
 func compactDashboard(connection: Bool, algorithm: String, height: UInt64?, epoch: UInt64?, uptime: TimeInterval,
                       activeMHps: Double, effectiveMHps: Double, power: Double?, efficiency: Double?, memoryBytes: UInt64?,
-                      snapshot: MiningPerformanceSnapshot, stats: EpicMiningStats, lastEvent: String) -> String {
+                      snapshot: MiningPerformanceSnapshot, stats: EpicMiningStats, jobShares: EpicJobShareStats?,
+                      lastCompletedJob: String, lastEvent: String) -> String {
     let powerText = power.map { String(format: "%.1f W", $0) } ?? "unavailable"
     let efficiencyText = efficiency.map { String(format: "%.2f MH/s/W", $0) } ?? "unavailable"
     let memoryText = memoryBytes.map { String(format: "%.1f MiB", Double($0) / 1_048_576) } ?? "unavailable"
@@ -119,6 +120,8 @@ func compactDashboard(connection: Bool, algorithm: String, height: UInt64?, epoc
     SHARES
     Accepted \(stats.accepted)   Rejected \(stats.rejected)   Stale \(stats.stale)   Unknown \(stats.unknown)
     Reconnects \(stats.reconnects)
+    This job      \(jobShares?.summary ?? "No active ProgPow job")
+    Previous job  \(lastCompletedJob)
     ------------------------------------------------------------
     Last event     \(lastEvent)
     """
