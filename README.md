@@ -65,11 +65,19 @@ select any Epic algorithm for a height, so passing `progpow` to
 | `--stats SECONDS` | `15` | Periodic status interval |
 | `--duration SEC` | unlimited | Stop after a controlled test duration |
 | `--log LEVEL` | `normal` | `quiet`, `normal`, or `verbose` |
+| `--color MODE` | `auto` | `auto`, `always`, or `never`; auto honors `NO_COLOR` |
+| `--log-file PATH` | none | Timestamped plain-text event log; parent directory is created |
 
 The status line reports dispatch-measured current and average hashrate,
 IOReport GPU power and MH/s/W when macOS exposes them, OS-reported resident
 memory, current height/epoch/share difficulty, and share/reconnect counters.
 Unavailable telemetry is printed as `unavailable`; it is never estimated.
+Active hashrate is measured only over completed ProgPow GPU dispatches.
+Effective hashrate divides completed hashes by full monotonic session time,
+including DAG preparation, reconnects, and non-ProgPow idle time.
+
+See `EPIC_METAL_M9_REPORT.md` for memory-lifetime findings, terminal behavior,
+and the statistics definitions.
 
 ## Troubleshooting
 

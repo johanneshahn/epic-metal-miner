@@ -16,6 +16,11 @@ struct EpicGpuBatchResult {
     let candidate: EpicGpuCandidate?
 }
 
+struct EpicGpuPreparation {
+    let rebuiltDAG: Bool
+    let compiledProgram: Bool
+}
+
 /// Reusable production search path. It shares the verified `epic_search`
 /// kernel with the benchmark and never uses a CPU hash fallback.
 final class EpicGpuSearcher {
@@ -23,7 +28,10 @@ final class EpicGpuSearcher {
     private let queue: MTLCommandQueue
     private var dagEpoch: UInt64?
     private var dag: DAGOutput?
-    private var pipelines: [UInt64: MTLComputePipelineState] = [:]
+    // Only the current period can be dispatched. Retaining every historical
+    // period's compiled pipeline is unnecessary and grows without bound.
+    private var pipelineSeed: UInt64?
+    private var pipeline: MTLComputePipelineState?
     // These shared buffers are reused across bounded dispatches. Reallocating
     // them for every nonce range needlessly added CPU/Metal-driver overhead to
     // the production loop.
@@ -47,26 +55,32 @@ final class EpicGpuSearcher {
     func releaseResources() {
         dag = nil
         dagEpoch = nil
-        pipelines.removeAll(keepingCapacity: false)
+        pipeline = nil
+        pipelineSeed = nil
     }
 
-    func prepare(for job: EpicMiningJob) throws {
+    func prepare(for job: EpicMiningJob) throws -> EpicGpuPreparation {
+        var rebuiltDAG = false
+        var compiledProgram = false
         if dagEpoch != job.epoch {
             print("[miner] building ProgPow epoch \(job.epoch) DAG")
             dag = try buildDAG(device: device, epoch: job.epoch)
             dagEpoch = job.epoch
+            rebuiltDAG = true
         }
-        if pipelines[job.progSeed] == nil {
-            pipelines[job.progSeed] = try compileEpicKernel(device: device, progSeed: job.progSeed)
+        if pipelineSeed != job.progSeed {
+            pipeline = try compileEpicKernel(device: device, progSeed: job.progSeed)
+            pipelineSeed = job.progSeed
+            compiledProgram = true
         }
+        return EpicGpuPreparation(rebuiltDAG: rebuiltDAG, compiledProgram: compiledProgram)
     }
 
     /// Search one contiguous nonce range. The kernel stops at the first
     /// top-64-bit prefilter match. The caller must resume at `nextNonce`, even
     /// when the full target rejects that candidate, to cover every nonce once.
     func search(job: EpicMiningJob, baseNonce: UInt64, groups: UInt32 = 4096) throws -> EpicGpuBatchResult {
-        try prepare(for: job)
-        guard let dag, let pso = pipelines[job.progSeed] else {
+        guard let dag, let pso = pipeline, pipelineSeed == job.progSeed else {
             throw EpicMiningError.malformedMessage("GPU searcher was not prepared")
         }
         let dagElements = dag.dagNumItems / 4

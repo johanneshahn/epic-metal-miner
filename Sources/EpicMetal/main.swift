@@ -23,6 +23,7 @@ func usage() -> Never {
       dag-crosscheck         validate the GPU DAG and c_dag against the Rust oracle
       stratum-check ENDPOINT read and validate one Epic Stratum template; no mining/submission
       protocol-selftest     test full 256-bit Epic difficulty/target conversion
+      statistics-selftest   test active/effective mining-time accounting
       mine ENDPOINT [options] mine consensus-selected ProgPow jobs; dry-run by default
                                 --worker ID       worker identity (default epic-metal)
                                 --password TEXT   Stratum password (default x)
@@ -31,6 +32,8 @@ func usage() -> Never {
                                 --stats SECONDS   status interval (default 15)
                                 --duration SEC    stop after this duration (testing only)
                                 --log LEVEL       quiet, normal (default), or verbose
+                                --color MODE      auto (default), always, or never
+                                --log-file PATH   write timestamped plain-text event log
       bench [options]        sustained GPU hashrate benchmark (real epoch, pre-validated)
                                --height N     block height (default 3795484, live tip)
                                --minutes F    run duration (default 10)
@@ -81,6 +84,10 @@ do {
         try runEpicProtocolSelfTest()
         exit(0)
 
+    case "statistics-selftest":
+        try runMiningStatisticsSelfTest()
+        exit(0)
+
     case "mine":
         guard args.count >= 3 else { usage() }
         var worker = "epic-metal"
@@ -90,6 +97,8 @@ do {
         var statisticsInterval: TimeInterval = 15
         var duration: TimeInterval?
         var verbosity: EpicLogVerbosity = .normal
+        var colorMode: EpicColorMode = .auto
+        var logFile: String?
         var i = 3
         while i < args.count {
             switch args[i] {
@@ -120,6 +129,14 @@ do {
                 guard i + 1 < args.count, let value = EpicLogVerbosity(rawValue: args[i + 1]) else { usage() }
                 verbosity = value
                 i += 2
+            case "--color":
+                guard i + 1 < args.count, let value = EpicColorMode(rawValue: args[i + 1]) else { usage() }
+                colorMode = value
+                i += 2
+            case "--log-file":
+                guard i + 1 < args.count else { usage() }
+                logFile = args[i + 1]
+                i += 2
             default:
                 FileHandle.standardError.write("unknown mine option \(args[i])\n".data(using: .utf8)!)
                 exit(2)
@@ -130,7 +147,7 @@ do {
         }
         let miningConfig = EpicMiningConfig(endpoint: args[2], worker: worker, password: password, submitShares: submit,
                                             maximumShares: maximumShares, statisticsInterval: statisticsInterval,
-                                            duration: duration, verbosity: verbosity)
+                                            duration: duration, verbosity: verbosity, colorMode: colorMode, logFile: logFile)
         try EpicMiningClient(device: device, config: miningConfig).run()
         exit(0)
 
