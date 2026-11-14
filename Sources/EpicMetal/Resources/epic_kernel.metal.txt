@@ -165,7 +165,7 @@ typedef struct { unsigned int uint32s[8]; } hash32_t;
 //   probe:  [0]=nonce lo  [1]=nonce hi  [2..9]=mix words  [10..17]=final words
 // ---------------------------------------------------------------------------
 kernel void epic_search(
-                   constant dag_t * g_dag,
+                   device const dag_t * g_dag,
                    constant uint *header_words,
                    device uint *results,
                    device atomic_uint *resultsIndex,

@@ -79,7 +79,10 @@ final class EpicGpuSearcher {
     /// Search one contiguous nonce range. The kernel stops at the first
     /// top-64-bit prefilter match. The caller must resume at `nextNonce`, even
     /// when the full target rejects that candidate, to cover every nonce once.
-    func search(job: EpicMiningJob, baseNonce: UInt64, groups: UInt32 = 4096) throws -> EpicGpuBatchResult {
+    // 8,192 groups amortize command-buffer turnaround on Apple Silicon while
+    // keeping each M4 Pro dispatch to roughly 150 ms, so fresh job latency
+    // remains bounded.
+    func search(job: EpicMiningJob, baseNonce: UInt64, groups: UInt32 = 8192) throws -> EpicGpuBatchResult {
         guard let dag, let pso = pipeline, pipelineSeed == job.progSeed else {
             throw EpicMiningError.malformedMessage("GPU searcher was not prepared")
         }
