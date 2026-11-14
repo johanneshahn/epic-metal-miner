@@ -1,0 +1,24 @@
+{
+  "configurations": [
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:epic-metal-miner}",
+      "name": "Debug epic-metal",
+      "target": "epic-metal",
+      "configuration": "debug",
+      "preLaunchTask": "swift: Build Debug epic-metal"
+    },
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:epic-metal-miner}",
+      "name": "Release epic-metal",
+      "target": "epic-metal",
+      "configuration": "release",
+      "preLaunchTask": "swift: Build Release epic-metal"
+    }
+  ]
+}
