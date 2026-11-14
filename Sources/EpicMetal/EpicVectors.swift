@@ -264,13 +264,15 @@ func runEpicProbe(device: MTLDevice,
 // Harness 1 — the 12 official vectors on the GPU
 // ---------------------------------------------------------------------------
 
-func runEpicVectorTest(device: MTLDevice) throws -> Bool {
+func runEpicVectorTest(device: MTLDevice,
+                       variant: EpicKernelVariant = .productionDefault) throws -> Bool {
     let vectors = try loadEpicVectors()
     let oracle = try loadEpicOracle()
     let queue = device.makeCommandQueue()!
 
     print("=== Epic ProgPoW 0.9.2 — GPU known-answer test ===")
     print("device: \(device.name)")
+    print("kernel variant: \(variant.rawValue)")
     print("vectors: \(vectors.count)  epochs: \(Set(vectors.map { $0.epoch }).sorted())")
 
     var dagCache: [UInt64: DAGOutput] = [:]
@@ -294,7 +296,7 @@ func runEpicVectorTest(device: MTLDevice) throws -> Bool {
         if let cached = psoCache[v.progSeed] {
             pso = cached
         } else {
-            pso = try compileEpicKernel(device: device, progSeed: v.progSeed)
+            pso = try compileEpicKernel(device: device, progSeed: v.progSeed, variant: variant)
             psoCache[v.progSeed] = pso
         }
 

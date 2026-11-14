@@ -26,6 +26,7 @@ struct EpicGpuPreparation {
 final class EpicGpuSearcher {
     private let device: MTLDevice
     private let queue: MTLCommandQueue
+    private let kernelVariant: EpicKernelVariant
     private var dagEpoch: UInt64?
     private var dag: DAGOutput?
     // Only the current period can be dispatched. Retaining every historical
@@ -40,8 +41,9 @@ final class EpicGpuSearcher {
     private let resultIndexBuffer: MTLBuffer
     private let stopBuffer: MTLBuffer
 
-    init(device: MTLDevice) {
+    init(device: MTLDevice, kernelVariant: EpicKernelVariant = .productionDefault) {
         self.device = device
+        self.kernelVariant = kernelVariant
         self.queue = device.makeCommandQueue()!
         self.headerBuffer = device.makeBuffer(length: 32, options: .storageModeShared)!
         self.resultsBuffer = device.makeBuffer(length: 64 * 4, options: .storageModeShared)!
@@ -69,7 +71,8 @@ final class EpicGpuSearcher {
             rebuiltDAG = true
         }
         if pipelineSeed != job.progSeed {
-            pipeline = try compileEpicKernel(device: device, progSeed: job.progSeed)
+            pipeline = try compileEpicKernel(device: device, progSeed: job.progSeed,
+                                             variant: kernelVariant)
             pipelineSeed = job.progSeed
             compiledProgram = true
         }

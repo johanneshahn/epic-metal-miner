@@ -19,7 +19,8 @@ func usage() -> Never {
     print("""
     usage: epic-metal <command> [args]
 
-      gpu-vectors            run the 12 official ProgPoW 0.9.2 vectors on the GPU
+      gpu-vectors [--kernel VARIANT]
+                             run the 12 official ProgPoW 0.9.2 vectors on the GPU
       dag-crosscheck         validate the GPU DAG and c_dag against the Rust oracle
       stratum-check ENDPOINT read and validate one Epic Stratum template; no mining/submission
       protocol-selftest     test full 256-bit Epic difficulty/target conversion
@@ -27,6 +28,7 @@ func usage() -> Never {
       mine ENDPOINT [options] mine consensus-selected ProgPow jobs; live submission by default
                                 --worker ID       worker identity (default epic-metal)
                                 --password TEXT   Stratum password (default x)
+                                --kernel NAME     no-post-dag-barrier (default) or standard (rollback)
                                 --submit          enable share submission (default; retained for compatibility)
                                 --dry-run         find shares locally without submitting them
                                 --max-shares N    stop after N submissions; 0 = continuous
@@ -41,7 +43,8 @@ func usage() -> Never {
                                --minutes F    run duration (default 10)
                                 --groups N     threadgroups per dispatch (default 4096)
                                 --threads N    threads per threadgroup (must be 256)
-                                --inflight N   command buffers in flight (default 8; use 1 to match mining)
+                               --inflight N   command buffers in flight (default 8; use 1 to match mining)
+                               --kernel NAME  no-post-dag-barrier (default) or standard
                                --header HEX   32-byte header hash
                                --target HEX   share target (default 0 = never wins)
                                --sample F     telemetry sample interval seconds (default 30)
@@ -68,10 +71,24 @@ func heightArg(_ idx: Int) -> UInt64 {
     return h
 }
 
+func kernelVariantArg(_ raw: String) -> EpicKernelVariant {
+    guard let variant = EpicKernelVariant(rawValue: raw) else {
+        FileHandle.standardError.write("invalid kernel variant '\(raw)'; expected no-post-dag-barrier or standard\n".data(using: .utf8)!)
+        exit(2)
+    }
+    return variant
+}
+
 do {
     switch command {
     case "gpu-vectors":
-        let ok = try runEpicVectorTest(device: device)
+        var variant = EpicKernelVariant.productionDefault
+        if args.count == 4, args[2] == "--kernel" {
+            variant = kernelVariantArg(args[3])
+        } else if args.count != 2 {
+            usage()
+        }
+        let ok = try runEpicVectorTest(device: device, variant: variant)
         exit(ok ? 0 : 1)
 
     case "dag-crosscheck":
@@ -104,6 +121,7 @@ do {
         var colorMode: EpicColorMode = .auto
         var dashboardMode: EpicDashboardMode = .compact
         var logFile: String?
+        var kernelVariant = EpicKernelVariant.productionDefault
         var i = 3
         while i < args.count {
             switch args[i] {
@@ -114,6 +132,10 @@ do {
             case "--password":
                 guard i + 1 < args.count else { usage() }
                 password = args[i + 1]
+                i += 2
+            case "--kernel":
+                guard i + 1 < args.count else { usage() }
+                kernelVariant = kernelVariantArg(args[i + 1])
                 i += 2
             case "--submit":
                 submit = true
@@ -162,7 +184,8 @@ do {
                                              maximumShares: maximumShares, statisticsInterval: statisticsInterval,
                                              statisticsIntervalWasSet: statisticsIntervalWasSet,
                                             duration: duration, verbosity: verbosity, colorMode: colorMode,
-                                            dashboardMode: dashboardMode, logFile: logFile)
+                                            dashboardMode: dashboardMode, logFile: logFile,
+                                            kernelVariant: kernelVariant)
         try EpicMiningClient(device: device, config: miningConfig).run()
         exit(0)
 
@@ -181,16 +204,17 @@ do {
         var i = 2
         while i < args.count {
             switch args[i] {
-            case "--height":  cfg.height = UInt64(args[i + 1])!; i += 2
-            case "--minutes": cfg.minutes = Double(args[i + 1])!; i += 2
-            case "--groups":  cfg.groups = UInt32(args[i + 1])!; i += 2
-            case "--threads": cfg.threadsPerGroup = UInt32(args[i + 1])!; i += 2
-            case "--inflight": cfg.inflight = Int(args[i + 1])!; i += 2
-            case "--header":  cfg.headerHex = args[i + 1]; i += 2
-            case "--target":  cfg.targetHex = args[i + 1]; i += 2
-            case "--sample":  cfg.sampleSeconds = Double(args[i + 1])!; i += 2
-            case "--json":    cfg.jsonOut = args[i + 1]; i += 2
-            case "--oracle":  cfg.oraclePath = args[i + 1]; i += 2
+            case "--height":  guard i + 1 < args.count, let value = UInt64(args[i + 1]) else { usage() }; cfg.height = value; i += 2
+            case "--minutes": guard i + 1 < args.count, let value = Double(args[i + 1]) else { usage() }; cfg.minutes = value; i += 2
+            case "--groups":  guard i + 1 < args.count, let value = UInt32(args[i + 1]) else { usage() }; cfg.groups = value; i += 2
+            case "--threads": guard i + 1 < args.count, let value = UInt32(args[i + 1]) else { usage() }; cfg.threadsPerGroup = value; i += 2
+            case "--inflight": guard i + 1 < args.count, let value = Int(args[i + 1]) else { usage() }; cfg.inflight = value; i += 2
+            case "--kernel": guard i + 1 < args.count else { usage() }; cfg.kernelVariant = kernelVariantArg(args[i + 1]); i += 2
+            case "--header":  guard i + 1 < args.count else { usage() }; cfg.headerHex = args[i + 1]; i += 2
+            case "--target":  guard i + 1 < args.count else { usage() }; cfg.targetHex = args[i + 1]; i += 2
+            case "--sample":  guard i + 1 < args.count, let value = Double(args[i + 1]) else { usage() }; cfg.sampleSeconds = value; i += 2
+            case "--json":    guard i + 1 < args.count else { usage() }; cfg.jsonOut = args[i + 1]; i += 2
+            case "--oracle":  guard i + 1 < args.count else { usage() }; cfg.oraclePath = args[i + 1]; i += 2
             case "--no-validate": cfg.skipValidation = true; i += 1
             default:
                 FileHandle.standardError.write("unknown bench option \(args[i])\n".data(using: .utf8)!)

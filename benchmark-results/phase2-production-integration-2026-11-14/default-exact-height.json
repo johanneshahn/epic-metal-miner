@@ -1,0 +1,135 @@
+{
+  "cpu_commit_avg_ms" : 0.011118253072102865,
+  "cpu_encode_avg_ms" : 0.013478597005208332,
+  "dag_elements" : 8323049,
+  "device" : "Apple M4 Pro",
+  "dispatch_timing_count" : 15,
+  "duration_minutes" : 0.02,
+  "elapsed_s" : 1.2088519334793091,
+  "epoch" : 126,
+  "gpu_dispatch_avg_ms" : 74.909022225377456,
+  "gpu_dispatch_timings" : [
+    {
+      "gpu_duration_s" : 0.07492116664070636,
+      "gpu_end_s" : 542607.02552179166,
+      "gpu_start_s" : 542606.95060062502,
+      "submit_to_gpu_start_s" : 0
+    },
+    {
+      "gpu_duration_s" : 0.074931375100277364,
+      "gpu_end_s" : 542607.10072187509,
+      "gpu_start_s" : 542607.02579049999,
+      "submit_to_gpu_start_s" : 0
+    },
+    {
+      "gpu_duration_s" : 0.076062125037424266,
+      "gpu_end_s" : 542607.17700450006,
+      "gpu_start_s" : 542607.10094237502,
+      "submit_to_gpu_start_s" : 0
+    },
+    {
+      "gpu_duration_s" : 0.074951708316802979,
+      "gpu_end_s" : 542607.25220012502,
+      "gpu_start_s" : 542607.1772484167,
+      "submit_to_gpu_start_s" : 0
+    },
+    {
+      "gpu_duration_s" : 0.074875333346426487,
+      "gpu_end_s" : 542607.32725362503,
+      "gpu_start_s" : 542607.25237829168,
+      "submit_to_gpu_start_s" : 0
+    },
+    {
+      "gpu_duration_s" : 0.074838500004261732,
+      "gpu_end_s" : 542607.40231400006,
+      "gpu_start_s" : 542607.32747550006,
+      "submit_to_gpu_start_s" : 0
+    },
+    {
+      "gpu_duration_s" : 0.074724541627801955,
+      "gpu_end_s" : 542607.47726804169,
+      "gpu_start_s" : 542607.40254350007,
+      "submit_to_gpu_start_s" : 0
+    },
+    {
+      "gpu_duration_s" : 0.074630291666835546,
+      "gpu_end_s" : 542607.55209954164,
+      "gpu_start_s" : 542607.47746924998,
+      "submit_to_gpu_start_s" : 0
+    },
+    {
+      "gpu_duration_s" : 0.074720875010825694,
+      "gpu_end_s" : 542607.62703262502,
+      "gpu_start_s" : 542607.55231175001,
+      "submit_to_gpu_start_s" : 0
+    },
+    {
+      "gpu_duration_s" : 0.074748916667886078,
+      "gpu_end_s" : 542607.70199966675,
+      "gpu_start_s" : 542607.62725075008,
+      "submit_to_gpu_start_s" : 0
+    },
+    {
+      "gpu_duration_s" : 0.074891375028528273,
+      "gpu_end_s" : 542607.77711625001,
+      "gpu_start_s" : 542607.70222487499,
+      "submit_to_gpu_start_s" : 0
+    },
+    {
+      "gpu_duration_s" : 0.074763916665688157,
+      "gpu_end_s" : 542607.85208904173,
+      "gpu_start_s" : 542607.77732512506,
+      "submit_to_gpu_start_s" : 0
+    },
+    {
+      "gpu_duration_s" : 0.074707208317704499,
+      "gpu_end_s" : 542607.92700650007,
+      "gpu_start_s" : 542607.85229929176,
+      "submit_to_gpu_start_s" : 0
+    },
+    {
+      "gpu_duration_s" : 0.074832499958574772,
+      "gpu_end_s" : 542608.00204950001,
+      "gpu_start_s" : 542607.92721700005,
+      "submit_to_gpu_start_s" : 0
+    },
+    {
+      "gpu_duration_s" : 0.075035499990917742,
+      "gpu_end_s" : 542608.07728500001,
+      "gpu_start_s" : 542608.00224950002,
+      "submit_to_gpu_start_s" : 0
+    }
+  ],
+  "gpu_energy_j" : 32.704637866001576,
+  "gpu_power_avg_w" : 27.054295865558423,
+  "gpu_power_peak_w" : 30.984886921146654,
+  "gpu_util_avg" : 98,
+  "gpu_util_max" : 98,
+  "groups" : 4096,
+  "hashes_per_dispatch" : 1048576,
+  "hashrate_mhps" : 13.011221278961717,
+  "header_hash" : "abf95d81edeb66ff175e8c1881d75eb426e5005e49decaa0ba9e0cbba9f0b8b6",
+  "height" : 3795484,
+  "joules_per_mh" : 2.0793048773448675,
+  "kernel_variant" : "no-post-dag-barrier",
+  "prog_seed" : 75909,
+  "samples" : [
+    {
+      "cumulative_mhps" : 14.902420373374307,
+      "elapsed_s" : 1.0554419755935669,
+      "gpu" : "device 98% renderer 10% tiler 3%",
+      "gpu_device_util" : 98,
+      "gpu_power_w" : 30.984886921146654,
+      "interval_mhps" : 14.902420373374307,
+      "thermal" : "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded"
+    }
+  ],
+  "steady_state_mhps" : 13.011221278961717,
+  "submit_to_gpu_start_avg_ms" : 0,
+  "target" : "0000000000000000",
+  "thermal" : "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded",
+  "threads_per_group" : 256,
+  "total_hashes" : 15728640,
+  "validation" : "oracle@3795484",
+  "wins" : 0
+}

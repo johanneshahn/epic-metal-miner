@@ -23,9 +23,19 @@ enum EpicKernelError: Error, CustomStringConvertible {
     }
 }
 
+/// `noPostDagBarrier` is the validated production default. `standard` remains
+/// available as an explicit rollback selection.
+enum EpicKernelVariant: String, CaseIterable {
+    case standard
+    case noPostDagBarrier = "no-post-dag-barrier"
+
+    static let productionDefault: EpicKernelVariant = .noPostDagBarrier
+}
+
 /// Fully-substituted Metal source for one prog_seed (useful for inspection and
 /// for measuring compile time without going through Metal).
-func epicKernelSource(progSeed: UInt64) throws -> String {
+func epicKernelSource(progSeed: UInt64,
+                      variant: EpicKernelVariant = EpicKernelVariant.productionDefault) throws -> String {
     guard let url = Bundle.module.url(forResource: "epic_kernel", withExtension: "metal.txt"),
           var src = try? String(contentsOf: url, encoding: .utf8) else {
         throw EpicKernelError.resourceMissing("epic_kernel.metal.txt")
@@ -33,11 +43,15 @@ func epicKernelSource(progSeed: UInt64) throws -> String {
     let gen = generateKernelSource(progSeed: progSeed)
     src = src.replacingOccurrences(of: "INCLUDE_PROGPOW_RANDOM_MATH", with: gen.randomMath)
     src = src.replacingOccurrences(of: "INCLUDE_PROGPOW_DATA_LOADS",  with: gen.dataLoads)
+    if variant == .noPostDagBarrier {
+        src = "#define EPIC_EXPERIMENTAL_NO_POST_DAG_BARRIER 1\n" + src
+    }
     return src
 }
 
-func compileEpicKernel(device: MTLDevice, progSeed: UInt64) throws -> MTLComputePipelineState {
-    let src = try epicKernelSource(progSeed: progSeed)
+func compileEpicKernel(device: MTLDevice, progSeed: UInt64,
+                       variant: EpicKernelVariant = EpicKernelVariant.productionDefault) throws -> MTLComputePipelineState {
+    let src = try epicKernelSource(progSeed: progSeed, variant: variant)
     let opts = MTLCompileOptions()
     opts.languageVersion = .version2_4
     let lib: MTLLibrary

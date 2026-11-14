@@ -1,0 +1,91 @@
+{
+  "cpu_commit_avg_ms" : 0.011033482021755643,
+  "cpu_encode_avg_ms" : 0.014543533325195312,
+  "dag_elements" : 4194296,
+  "device" : "Apple M4 Pro",
+  "dispatch_timing_count" : 9,
+  "duration_minutes" : 0.01,
+  "elapsed_s" : 0.6856839656829834,
+  "epoch" : 0,
+  "gpu_dispatch_avg_ms" : 75.539976824074984,
+  "gpu_dispatch_timings" : [
+    {
+      "gpu_duration_s" : 0.075181499938480556,
+      "gpu_end_s" : 542556.35019529168,
+      "gpu_start_s" : 542556.27501379175,
+      "submit_to_gpu_start_s" : 0
+    },
+    {
+      "gpu_duration_s" : 0.076238333364017308,
+      "gpu_end_s" : 542556.42669162503,
+      "gpu_start_s" : 542556.35045329167,
+      "submit_to_gpu_start_s" : 0
+    },
+    {
+      "gpu_duration_s" : 0.075600750045850873,
+      "gpu_end_s" : 542556.50250525004,
+      "gpu_start_s" : 542556.4269045,
+      "submit_to_gpu_start_s" : 0
+    },
+    {
+      "gpu_duration_s" : 0.075693624909035861,
+      "gpu_end_s" : 542556.57840862498,
+      "gpu_start_s" : 542556.50271500007,
+      "submit_to_gpu_start_s" : 0
+    },
+    {
+      "gpu_duration_s" : 0.075960874906741083,
+      "gpu_end_s" : 542556.65456262499,
+      "gpu_start_s" : 542556.57860175008,
+      "submit_to_gpu_start_s" : 0
+    },
+    {
+      "gpu_duration_s" : 0.075312333297915757,
+      "gpu_end_s" : 542556.73010137503,
+      "gpu_start_s" : 542556.65478904173,
+      "submit_to_gpu_start_s" : 0
+    },
+    {
+      "gpu_duration_s" : 0.075447749928571284,
+      "gpu_end_s" : 542556.805773,
+      "gpu_start_s" : 542556.73032525007,
+      "submit_to_gpu_start_s" : 0
+    },
+    {
+      "gpu_duration_s" : 0.075195041717961431,
+      "gpu_end_s" : 542556.88112841675,
+      "gpu_start_s" : 542556.80593337503,
+      "submit_to_gpu_start_s" : 0
+    },
+    {
+      "gpu_duration_s" : 0.0752295833081007,
+      "gpu_end_s" : 542556.95657362498,
+      "gpu_start_s" : 542556.88134404167,
+      "submit_to_gpu_start_s" : 0
+    }
+  ],
+  "gpu_energy_j" : 19.969829368870705,
+  "gpu_power_avg_w" : 29.123955595169164,
+  "gpu_power_peak_w" : -1,
+  "gpu_util_avg" : -1,
+  "gpu_util_max" : -1,
+  "groups" : 4096,
+  "hashes_per_dispatch" : 1048576,
+  "hashrate_mhps" : 13.763168562064864,
+  "header_hash" : "abf95d81edeb66ff175e8c1881d75eb426e5005e49decaa0ba9e0cbba9f0b8b6",
+  "height" : 0,
+  "joules_per_mh" : 2.1160792635674697,
+  "kernel_variant" : "no-post-dag-barrier",
+  "prog_seed" : 0,
+  "samples" : [
+
+  ],
+  "steady_state_mhps" : 13.763168562064864,
+  "submit_to_gpu_start_avg_ms" : 0,
+  "target" : "0000000000000000",
+  "thermal" : "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded",
+  "threads_per_group" : 256,
+  "total_hashes" : 9437184,
+  "validation" : "oracle@0",
+  "wins" : 0
+}

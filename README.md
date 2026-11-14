@@ -65,6 +65,9 @@ submit.
 # A one-hour dry-run with 30-second statistics
 .build/release/epic-metal mine HOST:PORT --worker my-mac --dry-run --duration 3600 --stats 30
 
+# Use the retained original kernel as an explicit rollback
+.build/release/epic-metal mine HOST:PORT --worker my-mac --kernel standard
+
 # `--submit` is accepted for compatibility; it is already the default
 .build/release/epic-metal mine HOST:PORT --worker my-mac --submit
 ```
@@ -100,6 +103,7 @@ select any Epic algorithm for a height, so passing `progpow` to
 | `ENDPOINT` | required | `HOST:PORT` Epic Stratum endpoint |
 | `--worker ID` | `epic-metal` | Stratum worker identity |
 | `--password TEXT` | `x` | Stratum password; MineFleet specifies `x` |
+| `--kernel NAME` | `no-post-dag-barrier` | ProgPow Metal kernel: the production default `no-post-dag-barrier`, or `standard` for rollback |
 | `--submit` | on | Send locally valid shares (compatibility option) |
 | `--dry-run` | off | Find locally valid shares without submitting them |
 | `--max-shares N` | unlimited | Stop after N submitted shares; `0` means unlimited |
@@ -109,6 +113,14 @@ select any Epic algorithm for a height, so passing `progpow` to
 | `--color MODE` | `auto` | `auto`, `always`, or `never`; `NO_COLOR` disables auto color |
 | `--dashboard MODE` | `compact` | Interactive `compact` or `detailed` dashboard |
 | `--log-file PATH` | none | Timestamped plain-text event log; parent directory is created |
+
+`no-post-dag-barrier` is the validated default. Across six paired 8,192-group
+measurements it increased hashrate by about 2.13% and reduced GPU dispatch
+time by about 2.09%. It does not change the ProgPow calculation, nonce range,
+share target handling, or mining protocol. GPU-energy efficiency has **not**
+been demonstrated to improve. Use `--kernel standard` to select the original
+kernel without rebuilding; the selected variant is written to the startup log
+and remains fixed for the mining session.
 
 The status line reports dispatch-measured current and average hashrate,
 IOReport GPU power and MH/s/W when macOS exposes them, OS-reported resident

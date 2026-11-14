@@ -294,6 +294,9 @@ struct EpicBenchConfig {
     var minutes: Double = 10
     var groups: UInt32 = 4096               // threadgroups per dispatch
     var threadsPerGroup: UInt32 = 256
+    /// The production default is used unless a benchmark explicitly chooses
+    /// the retained standard rollback kernel.
+    var kernelVariant: EpicKernelVariant = .productionDefault
     /// Command buffers allowed on the GPU simultaneously. Mining uses one
     /// synchronous dispatch; the default benchmark measures saturated GPU
     /// throughput with eight.
@@ -317,6 +320,7 @@ func runEpicBenchmark(device: MTLDevice, config: EpicBenchConfig) throws -> Int 
     print("duration:      \(config.minutes) min   sample every \(Int(config.sampleSeconds))s")
     print("dispatch:      \(config.groups) threadgroups x \(config.threadsPerGroup) threads = \(UInt64(config.groups) * UInt64(config.threadsPerGroup)) hashes")
     print("in flight:     \(config.inflight) command buffer\(config.inflight == 1 ? "" : "s")")
+    print("kernel variant: \(config.kernelVariant.rawValue)")
 
     // Header hash: explicit, else the live-vector header, else the known tip hash.
     let headerHex = config.headerHex
@@ -344,7 +348,7 @@ func runEpicBenchmark(device: MTLDevice, config: EpicBenchConfig) throws -> Int 
 
     // --- per-period program ---------------------------------------------
     let tCompile = Date()
-    let pso = try compileEpicKernel(device: device, progSeed: period)
+    let pso = try compileEpicKernel(device: device, progSeed: period, variant: config.kernelVariant)
     print(String(format: "[kernel] compiled prog_seed %llu in %.2fs", period, Date().timeIntervalSince(tCompile)))
 
     // --- pre-flight correctness check ------------------------------------
@@ -408,8 +412,16 @@ func runEpicBenchmark(device: MTLDevice, config: EpicBenchConfig) throws -> Int 
     }
     let sem = DispatchSemaphore(value: config.inflight)
     var baseNonce: UInt64 = 0
+    // Benchmark-only timing. Metal reports GPU start/end after completion;
+    // CPU timestamps bracket encoding and commit so a one-in-flight run can
+    // separate host submission cost from GPU execution time.
+    let timingLock = NSLock()
+    var gpuDispatchTimings = [[String: Double]]()
+    var cpuEncodeTimings = [Double]()
+    var cpuCommitTimings = [Double]()
 
-    func encode(_ cb: MTLCommandBuffer) {
+    func encode(_ cb: MTLCommandBuffer) -> Double {
+        let started = Date().timeIntervalSinceReferenceDate
         let enc = cb.makeComputeCommandEncoder()!
         enc.setComputePipelineState(pso)
         enc.setBuffer(dag.dag,    offset: 0, index: 0)
@@ -433,6 +445,36 @@ func runEpicBenchmark(device: MTLDevice, config: EpicBenchConfig) throws -> Int 
         )
         enc.endEncoding()
         baseNonce += hashesPerDispatch
+        return Date().timeIntervalSinceReferenceDate - started
+    }
+
+    func commit(_ cb: MTLCommandBuffer, measured: Bool) {
+        let encodeSeconds = encode(cb)
+        let commitStarted = Date().timeIntervalSinceReferenceDate
+        cb.addCompletedHandler { completed in
+            if measured {
+                let gpuStart = completed.gpuStartTime
+                let gpuEnd = completed.gpuEndTime
+                timingLock.lock()
+                gpuDispatchTimings.append([
+                    "gpu_start_s": gpuStart,
+                    "gpu_end_s": gpuEnd,
+                    "gpu_duration_s": max(0, gpuEnd - gpuStart),
+                    // This deliberately includes the very small CPU commit
+                    // interval; it is a stable host-submit-to-GPU-start metric.
+                    "submit_to_gpu_start_s": max(0, gpuStart - commitStarted),
+                ])
+                timingLock.unlock()
+            }
+            sem.signal()
+        }
+        cb.commit()
+        if measured {
+            timingLock.lock()
+            cpuEncodeTimings.append(encodeSeconds)
+            cpuCommitTimings.append(Date().timeIntervalSinceReferenceDate - commitStarted)
+            timingLock.unlock()
+        }
     }
 
     func drain() { for _ in 0..<config.inflight { sem.wait() } }
@@ -441,9 +483,7 @@ func runEpicBenchmark(device: MTLDevice, config: EpicBenchConfig) throws -> Int 
     print("\n--- warm-up ---")
     for _ in 0..<config.inflight {
         let cb = queue.makeCommandBuffer()!
-        cb.addCompletedHandler { _ in sem.signal() }
-        encode(cb)
-        cb.commit()
+        commit(cb, measured: false)
     }
     drain()
     baseNonce = 0
@@ -472,9 +512,7 @@ func runEpicBenchmark(device: MTLDevice, config: EpicBenchConfig) throws -> Int 
     while Date() < deadline {
         sem.wait()
         let cb = queue.makeCommandBuffer()!
-        cb.addCompletedHandler { _ in sem.signal() }
-        encode(cb)
-        cb.commit()
+        commit(cb, measured: true)
         totalHashes += hashesPerDispatch
 
         // A non-zero target can produce a winner; count it and clear the flags
@@ -530,6 +568,21 @@ func runEpicBenchmark(device: MTLDevice, config: EpicBenchConfig) throws -> Int 
     let utilAvg = utilValues.isEmpty ? nil : utilValues.reduce(0, +) / utilValues.count
     let utilMax = utilValues.max()
     let thermal = sampleThermalPressure()
+    timingLock.lock()
+    let timings = gpuDispatchTimings
+    let cpuEncodes = cpuEncodeTimings
+    let cpuCommits = cpuCommitTimings
+    timingLock.unlock()
+    func meanTiming(_ key: String) -> Double? {
+        let values = timings.compactMap { $0[key] }.filter { $0.isFinite && $0 >= 0 }
+        guard !values.isEmpty else { return nil }
+        return values.reduce(0, +) / Double(values.count)
+    }
+    func mean(_ values: [Double]) -> Double? {
+        let valid = values.filter { $0.isFinite && $0 >= 0 }
+        guard !valid.isEmpty else { return nil }
+        return valid.reduce(0, +) / Double(valid.count)
+    }
 
     // Whole-window energy, independent of the per-sample counter reads.
     var energyUsed: Double? = nil
@@ -547,6 +600,13 @@ func runEpicBenchmark(device: MTLDevice, config: EpicBenchConfig) throws -> Int 
     print("wins (target hit): \(wins)\(target == 0 ? "  (expected 0: target is 0)" : "")")
     print("gpu utilisation:   \(utilAvg.map { "avg \($0)%" } ?? "n/a")\(utilMax.map { ", max \($0)%" } ?? "")")
     print("thermal:           \(thermal)")
+    if let gpuDuration = meanTiming("gpu_duration_s") {
+        print(String(format: "dispatch timing:   GPU avg %.3f ms, CPU encode avg %.3f ms, commit avg %.3f ms, submit-to-GPU avg %.3f ms",
+                     gpuDuration * 1_000, (mean(cpuEncodes) ?? 0) * 1_000,
+                     (mean(cpuCommits) ?? 0) * 1_000, (meanTiming("submit_to_gpu_start_s") ?? 0) * 1_000))
+    } else {
+        print("dispatch timing:   unavailable (Metal GPU timestamps were not reported)")
+    }
     if let p = avgPower {
         let peak = powerValues.max()
         print(String(format: "gpu power:         avg %.2f W%@  (%.0f mJ total, IOReport GPU Energy)",
@@ -566,6 +626,7 @@ func runEpicBenchmark(device: MTLDevice, config: EpicBenchConfig) throws -> Int 
             "height": config.height,
             "epoch": epoch,
             "prog_seed": period,
+            "kernel_variant": config.kernelVariant.rawValue,
             "header_hash": headerHex,
             "target": String(format: "%016llx", target),
             "groups": config.groups,
@@ -584,6 +645,12 @@ func runEpicBenchmark(device: MTLDevice, config: EpicBenchConfig) throws -> Int 
             "gpu_energy_j": energyUsed ?? -1,
             "joules_per_mh": energyUsed.map { $0 / Double(totalHashes) * 1e6 } ?? -1,
             "thermal": thermal,
+            "dispatch_timing_count": timings.count,
+            "gpu_dispatch_avg_ms": (meanTiming("gpu_duration_s") ?? -1) * 1_000,
+            "cpu_encode_avg_ms": (mean(cpuEncodes) ?? -1) * 1_000,
+            "cpu_commit_avg_ms": (mean(cpuCommits) ?? -1) * 1_000,
+            "submit_to_gpu_start_avg_ms": (meanTiming("submit_to_gpu_start_s") ?? -1) * 1_000,
+            "gpu_dispatch_timings": timings,
             "validation": validationNote,
             "dag_elements": dagElements,
             "samples": samples,

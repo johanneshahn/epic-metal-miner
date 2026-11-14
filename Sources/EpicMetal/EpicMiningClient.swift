@@ -22,6 +22,8 @@ struct EpicMiningConfig {
     let colorMode: EpicColorMode
     let dashboardMode: EpicDashboardMode
     let logFile: String?
+    /// Selected once at startup; it is never changed while a mining session runs.
+    let kernelVariant: EpicKernelVariant
 }
 
 private var epicShutdownRequested = false
@@ -106,13 +108,14 @@ final class EpicMiningClient {
         self.config = config
         self.terminal = try MinerTerminal(colorMode: config.colorMode, logFile: config.logFile)
         self.powerSampler = GpuPowerSampler()
-        self.gpu = EpicGpuSearcher(device: device)
+        self.gpu = EpicGpuSearcher(device: device, kernelVariant: config.kernelVariant)
     }
 
     deinit { shutdown() }
 
     func run() throws {
         installSignalHandlers()
+        log(.normal, "ProgPow kernel variant: \(config.kernelVariant.rawValue)")
         let started = monotonicNow()
         sessionEnergyStart = powerSampler?.gpuJoules()
         defer {

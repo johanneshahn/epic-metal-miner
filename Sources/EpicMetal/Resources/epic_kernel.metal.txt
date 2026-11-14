@@ -246,7 +246,9 @@ kernel void epic_search(
             offset %= dagElements;
             offset = offset * PROGPOW_LANES + (lane_id ^ loop) % PROGPOW_LANES;
             dag_t data_dag = g_dag[offset];
+#if !defined(EPIC_EXPERIMENTAL_NO_POST_DAG_BARRIER)
             threadgroup_barrier(mem_flags::mem_threadgroup);
+#endif
             unsigned int data;
             INCLUDE_PROGPOW_RANDOM_MATH
             threadgroup_barrier(mem_flags::mem_threadgroup);
